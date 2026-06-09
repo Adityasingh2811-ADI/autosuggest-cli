@@ -1,0 +1,67 @@
+workflows:
+  - name: "git-flow"
+    steps:
+      - pattern: "git status"
+        next: ["git add .", "git diff", "git stash"]
+      - pattern: "git add *"
+        next: ["git commit -m ''", "git status", "git diff --cached"]
+      - pattern: "git commit *"
+        next: ["git push", "git log --oneline -5", "git status"]
+      - pattern: "git push*"
+        next: ["git status", "git log --oneline -5"]
+      - pattern: "git pull*"
+        next: ["git log --oneline -5", "git status", "git diff"]
+      - pattern: "git checkout *"
+        next: ["git status", "git pull", "git log --oneline -5"]
+      - pattern: "git branch*"
+        next: ["git checkout", "git status"]
+      - pattern: "git merge *"
+        next: ["git push", "git log --oneline -5", "git status"]
+      - pattern: "git stash"
+        next: ["git checkout", "git stash pop", "git stash list"]
+
+  - name: "python-dev"
+    steps:
+      - pattern: "pip install *"
+        next: ["python -m pytest", "pip freeze > requirements.txt", "python -c 'import *'"]
+      - pattern: "python -m pytest*"
+        next: ["git add .", "python -m pytest --cov", "python -m pytest -x"]
+      - pattern: "pip freeze*"
+        next: ["git add requirements.txt", "git commit -m 'update deps'"]
+      - pattern: "python setup.py *"
+        next: ["pip install -e .", "python -m pytest"]
+      - pattern: "pip install -e ."
+        next: ["python -m pytest", "suggest"]
+
+  - name: "build-test-deploy"
+    steps:
+      - pattern: "make build*"
+        next: ["make test", "make lint", "make run"]
+      - pattern: "make test*"
+        next: ["make build", "git add .", "make deploy"]
+      - pattern: "make lint*"
+        next: ["make build", "make test"]
+      - pattern: "make clean*"
+        next: ["make build", "make all"]
+      - pattern: "make deploy*"
+        next: ["make status", "git tag", "git push --tags"]
+
+  - name: "docker"
+    steps:
+      - pattern: "docker build *"
+        next: ["docker run", "docker images", "docker tag"]
+      - pattern: "docker run *"
+        next: ["docker ps", "docker logs", "docker stop"]
+      - pattern: "docker compose up*"
+        next: ["docker compose logs", "docker compose ps", "docker compose down"]
+      - pattern: "docker compose down*"
+        next: ["docker compose up -d", "docker system prune"]
+
+  - name: "navigation"
+    steps:
+      - pattern: "cd *"
+        next: ["ls", "git status", "dir"]
+      - pattern: "ls*"
+        next: ["cd", "cat", "code ."]
+      - pattern: "dir*"
+        next: ["cd", "type", "code ."]

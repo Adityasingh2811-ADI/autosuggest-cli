@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cli-autosuggest"
+version = "0.1.0"
+description = "A context-aware CLI autosuggestion engine."
+readme = "project_canvas.md"
+requires-python = ">=3.10"
+dependencies = [
+    "prompt_toolkit>=3.0.0",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+suggest = "autosuggest.main:run"
+suggest-daemon = "autosuggest.daemon:run_daemon"
+suggest-import = "autosuggest.importer:run_import"
+suggest-hook = "autosuggest.hooks:run_hook"
