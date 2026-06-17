@@ -70,6 +70,24 @@ eval "$(suggest-hook bash)"
 suggest-hook install bash
 ```
 
+The bash hook records telemetry and adds next-step suggestions after each
+command, a frecency-aware Tab completion, and an accept-top-suggestion
+binding (`Ctrl+F`, or `Right Arrow` at end of line). Installing `socat` is
+recommended for lowest-latency telemetry. Stock bash cannot draw
+continuously-updating inline ghost text — use the zsh hook for that.
+
+**Zsh:**
+```zsh
+# Add to ~/.zshrc
+eval "$(suggest-hook zsh)"
+
+# Or auto-install:
+suggest-hook install zsh
+```
+
+The zsh hook adds true inline ghost-text (accept with `Right Arrow` or
+`Ctrl+F`) plus frecency completion and next-step suggestions.
+
 **PowerShell:**
 ```powershell
 # Auto-install to $PROFILE:
@@ -83,6 +101,7 @@ Bootstrap the engine with your existing command history:
 ```bash
 suggest-import                     # Auto-detect and import all found history
 suggest-import --bash ~/.bash_history
+suggest-import --zsh ~/.zsh_history
 suggest-import --powershell PATH
 ```
 
