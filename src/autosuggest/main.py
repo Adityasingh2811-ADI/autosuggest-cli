@@ -27,8 +27,9 @@ from autosuggest.arg_completers import get_arg_completions
 from autosuggest.daemon import is_daemon_running
 from autosuggest.engine import PredictionEngine
 from autosuggest.next_steps import NextStepResolver
+from autosuggest.paths import socket_path
 
-SOCKET_PATH = "/tmp/cli_autosuggest.sock"
+SOCKET_PATH = socket_path()
 
 STYLE = Style.from_dict({
     "auto-suggestion": "fg:#6c6c6c italic",

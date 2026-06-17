@@ -1,0 +1,693 @@
+================================================================================
+                    AUTOSUGGEST-CLI — USER GUIDE
+================================================================================
+
+  Version:  0.4.0
+  Date:     2026-06-15
+  Platform: Windows 10/11, Linux, macOS
+  Author:   ASingh56 / CLI Tooling Team, Analog Devices
+
+================================================================================
+TABLE OF CONTENTS
+================================================================================
+
+  1.  What Is This?
+  2.  Prerequisites
+  3.  Installation
+  4.  Quick Start (5 Minutes)
+  5.  Two Ways to Use It
+  6.  The Interactive Shell (suggest)
+  7.  Native Shell Integration (PowerShell / Bash)
+  8.  PowerShell Ghost-Text (PS7+ Inline Predictions)
+  9.  Next-Step Suggestions
+  10. Argument-Aware Completions
+  11. Importing Existing History
+  12. Managing the Daemon
+  13. Customizing Workflows
+  14. How Suggestions Improve Over Time
+  15. Command Reference
+  16. Troubleshooting
+  17. Uninstalling
+
+================================================================================
+1. WHAT IS THIS?
+================================================================================
+
+  autosuggest-cli is a context-aware command-line suggestion engine that
+  learns from your command history and predicts what you'll type next.
+
+  Key capabilities:
+    - Ghost-text predictions as you type (like IDE autocomplete)
+    - Tab-completion menu with scored suggestions
+    - "What to do next" suggestions after every command
+    - Live argument completions (branch names, Docker containers, etc.)
+    - Works in native PowerShell/Bash OR in its own interactive shell
+    - Learns from your habits — suggestions improve over time
+    - Directory-aware: knows project context
+
+  Think of it as autocomplete for your command line — one that remembers
+  every command you've ever run and uses that memory intelligently.
+
+================================================================================
+2. PREREQUISITES
+================================================================================
+
+  Required:
+    - Python 3.10 or later
+    - pip (included with Python)
+
+  Optional (for argument-aware completions):
+    - Git (for branch/tag completions)
+    - Docker (for container/image completions)
+
+  For PowerShell ghost-text (inline predictions):
+    - PowerShell 7+ (pwsh)
+    - PSReadLine 2.2.6+
+
+================================================================================
+3. INSTALLATION
+================================================================================
+
+  FROM SOURCE (DEVELOPMENT)
+  -------------------------
+    git clone <repo-url> autosuggest-cli
+    cd autosuggest-cli
+    pip install -e .
+
+  FROM SOURCE (PRODUCTION)
+  -------------------------
+    cd autosuggest-cli
+    pip install .
+
+  VERIFY INSTALLATION
+  -------------------
+  Run these commands — each should produce output without error:
+
+    suggest --help
+    suggest-daemon status
+    suggest-import --help
+    suggest-hook --help
+    suggest-nextsteps --help
+    suggest-stats --help
+
+  INSTALLED COMMANDS
+  ------------------
+    suggest              Interactive shell with ghost-text
+    suggest-daemon       Background telemetry daemon
+    suggest-import       Import existing shell history
+    suggest-hook         Shell integration hooks
+    suggest-nextsteps    Next-step suggestion CLI
+    suggest-stats        Usage statistics
+
+================================================================================
+4. QUICK START (5 MINUTES)
+================================================================================
+
+  Step 1: Import your existing history (one-time bootstrap)
+  ---------------------------------------------------------
+    suggest-import
+
+    This finds bash and PowerShell history files and imports them so
+    suggestions work from day one.
+
+  Step 2: Install shell integration
+  ---------------------------------
+    For PowerShell (Windows):
+      suggest-hook install powershell
+
+    For Bash (Linux/WSL/macOS):
+      suggest-hook install bash
+
+    Restart your shell after installing.
+
+  Step 3: Use your shell normally
+  --------------------------------
+    The daemon auto-starts when needed. Every command you run feeds the
+    suggestion engine. Within minutes you'll see personalized suggestions.
+
+  Step 4 (Optional): Try the interactive shell
+  ---------------------------------------------
+    suggest
+
+    Launches a dedicated shell with the full ghost-text experience.
+    Good for exploring what the tool can do.
+
+  That's it. You're set up.
+
+================================================================================
+5. TWO WAYS TO USE IT
+================================================================================
+
+  MODE A: NATIVE SHELL INTEGRATION (Recommended)
+  -----------------------------------------------
+  Stay in your normal PowerShell or Bash session. The shell hook provides:
+
+    PowerShell 7+:
+      - Inline ghost-text predictions (PSReadLine ICommandPredictor)
+      - Ctrl+F to accept top suggestion
+      - Right-arrow to accept inline prediction
+      - Tab completions augmented with frecency results
+      - Next-step suggestions after each command
+
+    PowerShell 5.1:
+      - Ctrl+F to accept top suggestion
+      - Tab completions augmented with frecency results
+      - Next-step suggestions after each command
+
+    Bash:
+      - Telemetry recording (feeds the prediction engine)
+      - Works with existing bash completion
+
+  MODE B: INTERACTIVE SHELL (suggest)
+  ------------------------------------
+  A self-contained shell with the richest UX:
+    - Real-time ghost-text as you type
+    - Tab/Shift+Tab dropdown with scores
+    - Next-step suggestions with numbered shortcuts
+    - Argument-aware completions
+
+  Use whichever mode fits your workflow. They share the same database
+  and improve each other's suggestions.
+
+================================================================================
+6. THE INTERACTIVE SHELL (suggest)
+================================================================================
+
+  Launch:
+    suggest
+
+  GHOST-TEXT (Inline Predictions)
+  -------------------------------
+  Grey italic text appears showing the predicted completion:
+
+    ~/project > git st|atus              <- "atus" is ghost-text
+
+  Press RIGHT ARROW to accept the ghost-text into your input.
+  Keep typing to get a more specific prediction.
+
+  TAB COMPLETION (Dropdown Menu)
+  ------------------------------
+  Press TAB to open a completion dropdown:
+
+    ~/project > git
+    > git status           3.45
+    > git add .            2.10
+    > git commit -m ''     1.80
+
+  Numbers are frecency scores (higher = more relevant).
+  TAB / SHIFT+TAB to cycle. ENTER to execute.
+
+  NEXT-STEP SUGGESTIONS
+  ----------------------
+  After every command, numbered suggestions appear:
+
+    ~/project > git status
+    ...output...
+
+      Next steps:
+      [1] git add .                    (workflow)
+      [2] git diff                     (learned)
+
+  Type the number and press Enter to execute that suggestion.
+
+  KEY BINDINGS
+  ------------
+    Right Arrow   Accept ghost-text
+    Tab           Cycle completions forward
+    Shift+Tab     Cycle completions backward
+    Enter         Execute command
+    Ctrl+D        Exit shell
+    1/2/3         Execute numbered next-step suggestion
+
+  CHANGING DIRECTORIES
+  --------------------
+    cd ~/projects/my-app
+
+  The prompt updates. Tilde (~) expansion is supported.
+
+  EXITING
+  -------
+  Type "exit", "quit", or press Ctrl+D.
+
+================================================================================
+7. NATIVE SHELL INTEGRATION (POWERSHELL / BASH)
+================================================================================
+
+  Shell integration lets autosuggest-cli learn from your real shell without
+  requiring you to use the `suggest` interactive shell.
+
+  HOW IT WORKS
+  ------------
+  A lightweight hook runs after every command. It records:
+    - What command you ran
+    - What directory you were in
+    - Whether it succeeded or failed
+
+  Overhead: <5ms per command — invisible in normal use.
+
+  SETUP: POWERSHELL
+  -----------------
+  Option A — Automatic install:
+    suggest-hook install powershell
+
+  Option B — Manual install:
+    1. Open your profile:  notepad $PROFILE
+    2. Add this line:
+         Invoke-Expression ((& suggest-hook powershell) -join "`n")
+    3. Save and restart PowerShell
+
+  SETUP: BASH
+  -----------
+  Option A — Automatic install:
+    suggest-hook install bash
+
+  Option B — Manual install:
+    1. Open ~/.bashrc
+    2. Add:  eval "$(suggest-hook bash)"
+    3. Run:  source ~/.bashrc
+
+  VERIFYING IT WORKS
+  ------------------
+  After setup, run a few commands in your shell, then:
+
+    python -c "
+    import sqlite3; from pathlib import Path
+    c = sqlite3.connect(str(Path.home()/'.cli_autosuggest.db'))
+    print(c.execute('SELECT COUNT(*) FROM command_history').fetchone()[0])
+    "
+
+  The count should increase with each command you run.
+
+  UNINSTALLING THE HOOK
+  ---------------------
+  Remove the autosuggest line from your profile (~/.bashrc or $PROFILE).
+  The hook silently fails if the daemon isn't running — no harm in
+  leaving it installed.
+
+================================================================================
+8. POWERSHELL GHOST-TEXT (PS7+ INLINE PREDICTIONS)
+================================================================================
+
+  On PowerShell 7+ with PSReadLine 2.2.6+, the hook registers a native
+  ICommandPredictor plugin that provides real-time inline ghost-text:
+
+    PS C:\project> git ch|eckout main     <- grey ghost-text
+
+  HOW IT WORKS
+  ------------
+  1. As you type, PSReadLine queries the autosuggest predictor
+  2. The predictor calls `python -m autosuggest.query` in the background
+  3. Results are cached for 2 seconds (no subprocess per keystroke)
+  4. A 150ms timeout prevents blocking — stale cache is returned if slow
+  5. PSReadLine renders the top result as inline ghost-text
+
+  KEY BINDINGS
+  ------------
+    Right Arrow    Accept the inline prediction
+    Ctrl+F         Replace entire line with top frecency suggestion
+    Tab            Cycle Tab completions (includes frecency results)
+
+  PERFORMANCE
+  -----------
+  - First query per prefix: ~50-150ms (Python subprocess)
+  - Subsequent typing (cache hit): <1ms
+  - Cache TTL: 2 seconds
+  - Timeout: 150ms (returns stale cache on timeout)
+
+  The predictor uses prefix-superstring optimization: typing "git s" then
+  "git st" reuses the cached results from "git s" without re-querying.
+
+  FALLBACK (PS5.1 / OLDER PSREADLINE)
+  ------------------------------------
+  On older PowerShell, ghost-text is not available. Use:
+    - Ctrl+F to accept the top frecency suggestion
+    - Tab for augmented completions
+
+================================================================================
+9. NEXT-STEP SUGGESTIONS
+================================================================================
+
+  After every command, the tool suggests what to do next:
+
+    PS C:\project> git add .
+
+      Next steps:
+      [1] git commit -m ''               (workflow)
+      [2] git status                     (workflow)
+      [3] git diff --cached              (workflow)
+
+  WHERE SUGGESTIONS COME FROM
+  ----------------------------
+  Two sources, merged by priority:
+
+  1. WORKFLOW RULES (tagged "workflow")
+     Predefined in workflows.yaml. High confidence patterns.
+     Example: after "git add *" → suggest commit, status, diff
+
+  2. LEARNED PATTERNS (tagged "learned")
+     Mined from your actual command sequences. Shows what you
+     typically run after a given command, in the same directory,
+     within 5 minutes. Adapts to personal habits over time.
+
+  Workflow rules appear first; learned patterns fill remaining slots.
+
+  ACCEPTING SUGGESTIONS (INTERACTIVE SHELL)
+  ------------------------------------------
+  In the `suggest` interactive shell, type the number (1, 2, or 3)
+  and press Enter:
+
+    ~/project > 1
+      >> git commit -m ''
+
+  USING IN POWERSHELL / BASH
+  ---------------------------
+  In native shell integration, next-step suggestions are displayed after
+  each command completes (shown in color). Copy or retype the command.
+
+  CLI ACCESS
+  ----------
+  Query next-steps directly:
+
+    suggest-nextsteps "git add ." "C:\Users\ASingh56\project"
+
+  Output (tab-delimited):
+    git commit -m ''    workflow    1.0
+    git status          workflow    1.0
+    git diff --cached   workflow    1.0
+
+================================================================================
+10. ARGUMENT-AWARE COMPLETIONS
+================================================================================
+
+  For certain commands, the tool fetches LIVE data instead of relying
+  on history alone.
+
+  SUPPORTED COMMANDS
+  ------------------
+
+  Git (requires git on PATH):
+    git checkout <branch>       Real branch names
+    git switch <branch>         Real branch names
+    git merge <branch>          Real branch names
+    git rebase <branch>         Real branch names
+    git branch -d <branch>      Real branch names
+    git push <remote>           Configured remotes
+    git pull <remote>           Configured remotes
+    git fetch <remote>          Configured remotes
+    git tag -d <tag>            Existing tags
+
+  Docker (requires docker on PATH):
+    docker run <image>          Local images (repo:tag)
+    docker rmi <image>          Local images
+    docker exec <container>     Running containers
+    docker stop <container>     Running containers
+    docker logs <container>     Running containers
+    docker rm <container>       Running containers
+
+  Make (reads Makefile in current directory):
+    make <target>               Targets from Makefile
+
+  Pip (uses current Python environment):
+    pip install <package>       Installed packages
+    pip uninstall <package>     Installed packages
+    pip show <package>          Installed packages
+
+  HOW IT WORKS
+  -------------
+  1. You type "git checkout " (with trailing space)
+  2. The tool detects a known argument pattern
+  3. Runs the appropriate command (e.g., `git branch`) with 500ms timeout
+  4. Results shown with a source tag: "(git)", "(docker)", "(make)"
+  5. Results cached for 5 seconds
+
+  Falls back silently to history if the tool isn't installed or times out.
+
+================================================================================
+11. IMPORTING EXISTING HISTORY
+================================================================================
+
+  Your shell has years of command history. Import it for immediate
+  suggestions instead of starting from scratch.
+
+  AUTO-DETECT (RECOMMENDED)
+  -------------------------
+    suggest-import
+
+  This finds and imports all available history files.
+
+  IMPORT SPECIFIC FILES
+  ---------------------
+    suggest-import --bash ~/.bash_history
+    suggest-import --powershell "C:\path\to\ConsoleHost_history.txt"
+
+  FIND YOUR POWERSHELL HISTORY PATH
+  ---------------------------------
+    (Get-PSReadLineOption).HistorySavePath
+
+  WHAT GETS IMPORTED
+  ------------------
+    - Every command with 2+ characters
+    - All assumed successful (exit_status = 0)
+    - Directory set to "~" (engine adapts over time)
+    - Timestamps preserved if available
+    - Safe to re-run: duplicates don't cause issues
+
+================================================================================
+12. MANAGING THE DAEMON
+================================================================================
+
+  The daemon is a background process that receives telemetry and writes
+  it to the SQLite database.
+
+  COMMANDS
+  --------
+    suggest-daemon start     Start the daemon
+    suggest-daemon stop      Stop the daemon
+    suggest-daemon status    Check if it's running
+
+  AUTO-START
+  ----------
+  The daemon auto-starts:
+    - When you launch the `suggest` shell
+    - When a shell hook loads (PowerShell/Bash)
+
+  You rarely need to manage it manually.
+
+  DATA LOCATIONS
+  ---------------
+    Database:  ~/.cli_autosuggest.db
+    Pidfile:   ~/.cli_autosuggest.pid
+    TCP Port:  127.0.0.1:19526
+
+  The database is a single SQLite file. Copy it between machines
+  to transfer your command history.
+
+================================================================================
+13. CUSTOMIZING WORKFLOWS
+================================================================================
+
+  Edit: src/autosuggest/workflows.yaml
+
+  ADDING RULES
+  ------------
+  Each workflow is a named group of pattern-to-suggestion mappings:
+
+    workflows:
+      - name: "my-team-flow"
+        steps:
+          - pattern: "npm run build"
+            next: ["npm test", "npm run lint", "npm start"]
+          - pattern: "terraform plan*"
+            next: ["terraform apply", "terraform show"]
+
+  PATTERN SYNTAX
+  --------------
+  Patterns use glob-style matching (fnmatch):
+    "git status"       Exact match
+    "git add *"        Matches "git add ." or "git add src/file.py"
+    "make build*"      Matches "make build" and "make build-release"
+
+  TEAM-SPECIFIC EXAMPLES
+  ----------------------
+  FPGA/Hardware:
+    - pattern: "vivado -mode batch *"
+      next: ["check_timing.tcl", "generate_bitstream.tcl"]
+
+  Embedded:
+    - pattern: "make flash*"
+      next: ["minicom -D /dev/ttyUSB0", "make verify"]
+
+  DevOps:
+    - pattern: "kubectl apply *"
+      next: ["kubectl get pods", "kubectl logs"]
+
+  No code changes needed — YAML edits only.
+
+================================================================================
+14. HOW SUGGESTIONS IMPROVE OVER TIME
+================================================================================
+
+  THE FRECENCY ALGORITHM
+  ----------------------
+  Suggestions are scored by combining:
+
+    1. RECENCY — Recent commands score higher
+       Half-life: 1 hour (50% weight after 1 hour, 25% after 2, etc.)
+
+    2. FREQUENCY — More uses = higher accumulated score
+
+    3. CONTEXT — Same directory = 3x score boost
+
+  COLD START TO PERSONALIZED
+  ---------------------------
+    Day 0:   Import history → basic suggestions from past commands
+    Day 1:   Shell hook records real commands with timestamps + cwd
+    Week 1:  Learned patterns emerge (sequential command pairs)
+    Week 2+: Highly personalized, directory-aware suggestions
+
+  The tool never forgets — it weights recent activity much higher.
+
+================================================================================
+15. COMMAND REFERENCE
+================================================================================
+
+  suggest
+  -------
+  Launch interactive shell with ghost-text and tab completion.
+  Auto-starts daemon.
+
+    Usage: suggest
+
+  suggest-daemon [start|stop|status]
+  -----------------------------------
+  Manage the background telemetry daemon.
+
+    suggest-daemon start     Start daemon
+    suggest-daemon stop      Stop daemon
+    suggest-daemon status    Show status
+
+  suggest-import [OPTIONS]
+  ------------------------
+  Import shell history into the suggestion database.
+
+    suggest-import                    Auto-detect all history files
+    suggest-import --bash PATH        Import bash history
+    suggest-import --powershell PATH  Import PowerShell history
+
+  suggest-hook <shell|install shell>
+  -----------------------------------
+  Print or install shell integration hooks.
+
+    suggest-hook bash                 Print bash hook
+    suggest-hook powershell           Print PowerShell hook
+    suggest-hook install bash         Install into ~/.bashrc
+    suggest-hook install powershell   Install into $PROFILE
+
+  suggest-nextsteps <command> <cwd> [--limit N]
+  -----------------------------------------------
+  Query next-step suggestions for a given command and directory.
+
+    suggest-nextsteps "git add ." "/path/to/project"
+    suggest-nextsteps "make build" "." --limit 5
+
+  Output: tab-delimited lines (command, source, confidence)
+
+  suggest-stats
+  -------------
+  Display usage statistics from the command history database.
+
+    suggest-stats
+
+================================================================================
+16. TROUBLESHOOTING
+================================================================================
+
+  PROBLEM: "No suggestions appearing"
+  ------------------------------------
+  1. Check database has data:
+       suggest-daemon status
+       python -c "
+       import sqlite3; from pathlib import Path
+       c = sqlite3.connect(str(Path.home()/'.cli_autosuggest.db'))
+       print('Commands:', c.execute('SELECT COUNT(*) FROM command_history').fetchone()[0])
+       "
+     If 0: run `suggest-import` to bootstrap.
+
+  2. Test directly:
+       python -c "
+       from autosuggest.engine import PredictionEngine
+       e = PredictionEngine()
+       print(e.get_suggestions('git', '.', limit=5))
+       e.close()
+       "
+
+  PROBLEM: "Daemon won't start"
+  ------------------------------
+  1. Check port:
+       netstat -an | findstr 19526       (Windows)
+       ss -tlnp | grep 19526            (Linux)
+
+  2. Remove stale pidfile:
+       suggest-daemon status
+       del ~/.cli_autosuggest.pid        (Windows)
+       suggest-daemon start
+
+  PROBLEM: "Shell hook not recording"
+  ------------------------------------
+  1. Is daemon running?  suggest-daemon status
+  2. Is hook installed?
+       Select-String autosuggest $PROFILE       (PowerShell)
+       grep autosuggest ~/.bashrc               (bash)
+  3. Test manually:
+       python -c "
+       import socket, json
+       s = socket.socket(); s.settimeout(1)
+       s.connect(('127.0.0.1', 19526))
+       s.sendall(json.dumps({'command':'test','cwd':'.','exit_status':0}).encode())
+       s.close(); print('OK')
+       "
+
+  PROBLEM: "Ghost-text not showing in PowerShell"
+  -------------------------------------------------
+  1. Check version: $PSVersionTable.PSVersion (need 7+)
+  2. Check PSReadLine: (Get-Module PSReadLine).Version (need 2.2.6+)
+  3. Verify prediction source:
+       Get-PSReadLineOption | Select PredictionSource
+     Should show "HistoryAndPlugin"
+  4. Re-run hook:
+       Invoke-Expression ((& suggest-hook powershell) -join "`n")
+
+  PROBLEM: "Argument completions not showing"
+  --------------------------------------------
+  1. Type a SPACE after the command:
+       git checkout |   <- triggers argument completer
+       git checkout|    <- treated as prefix match
+  2. Verify tool installed: git --version / docker --version
+  3. Test: python -c "
+       from autosuggest.arg_completers import get_arg_completions
+       import os; print(get_arg_completions('git checkout ', os.getcwd()))
+       "
+
+================================================================================
+17. UNINSTALLING
+================================================================================
+
+  REMOVE THE PACKAGE
+  ------------------
+    pip uninstall cli-autosuggest
+
+  REMOVE SHELL HOOKS
+  ------------------
+  Edit your profile and remove the autosuggest line:
+    PowerShell: notepad $PROFILE
+    Bash:       nano ~/.bashrc
+
+  REMOVE DATA (OPTIONAL)
+  -----------------------
+  Delete these files to remove all stored history:
+    ~/.cli_autosuggest.db
+    ~/.cli_autosuggest.pid
+
+================================================================================
+  END OF USER GUIDE
+================================================================================

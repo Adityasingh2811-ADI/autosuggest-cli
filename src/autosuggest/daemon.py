@@ -15,12 +15,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-DB_PATH = Path.home() / ".cli_autosuggest.db"
-PID_PATH = Path.home() / ".cli_autosuggest.pid"
-SOCKET_PATH = "/tmp/cli_autosuggest.sock"
-SCHEMA_PATH = Path(__file__).parent / "schema.sql"
+from autosuggest.paths import db_path, pid_path, socket_path
+from autosuggest.paths import IS_WINDOWS
+from autosuggest.engine import _SCHEMA
 
-IS_WINDOWS = sys.platform == "win32"
+DB_PATH = db_path()
+PID_PATH = pid_path()
+SOCKET_PATH = socket_path()
+
 TCP_HOST = "127.0.0.1"
 TCP_PORT = 19526
 
@@ -30,8 +32,7 @@ def init_db() -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA synchronous=NORMAL;")
     conn.execute("PRAGMA busy_timeout=5000;")
-    with open(SCHEMA_PATH) as f:
-        conn.executescript(f.read())
+    conn.executescript(_SCHEMA)
     return conn
 
 

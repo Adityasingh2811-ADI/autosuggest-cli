@@ -9,8 +9,9 @@ from pathlib import Path
 import yaml
 
 from autosuggest.engine import NextStep, PredictionEngine
+from autosuggest.paths import workflows_path
 
-WORKFLOWS_PATH = Path(__file__).parent / "workflows.yaml"
+WORKFLOWS_PATH = workflows_path()
 
 
 class NextStepResolver:

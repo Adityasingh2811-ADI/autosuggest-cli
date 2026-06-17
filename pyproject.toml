@@ -13,8 +13,25 @@ dependencies = [
     "pyyaml>=6.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+
 [project.scripts]
+autosuggest = "autosuggest.launcher:main"
 suggest = "autosuggest.main:run"
 suggest-daemon = "autosuggest.daemon:run_daemon"
 suggest-import = "autosuggest.importer:run_import"
 suggest-hook = "autosuggest.hooks:run_hook"
+suggest-nextsteps = "autosuggest.nextsteps_cli:main"
+suggest-stats = "autosuggest.stats:run"
+suggest-seed = "autosuggest.seed:run_seed"
+
+[tool.setuptools.package-data]
+autosuggest = ["schema.sql", "workflows.yaml", "seed_commands.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"

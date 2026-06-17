@@ -8,7 +8,9 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-DB_PATH = Path.home() / ".cli_autosuggest.db"
+from autosuggest.paths import db_path
+
+DB_PATH = db_path()
 
 # Decay half-life in seconds (1 hour).
 # After 1 hour a command's recency contribution halves.
@@ -60,10 +62,30 @@ class NextStep:
     source: str
 
 
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS command_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    command TEXT NOT NULL,
+    cwd TEXT NOT NULL,
+    exit_status INTEGER NOT NULL DEFAULT 0,
+    timestamp REAL NOT NULL DEFAULT (unixepoch('now', 'subsec'))
+);
+CREATE INDEX IF NOT EXISTS idx_frecency
+    ON command_history(cwd, timestamp DESC, command);
+CREATE INDEX IF NOT EXISTS idx_global_recency
+    ON command_history(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_frequency
+    ON command_history(command, cwd);
+CREATE INDEX IF NOT EXISTS idx_sequence
+    ON command_history(cwd, command, timestamp);
+"""
+
+
 class PredictionEngine:
     def __init__(self, db_path: str | Path = DB_PATH) -> None:
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL;")
+        self._conn.executescript(_SCHEMA)
         self._conn.execute("PRAGMA query_only=ON;")
 
     def get_suggestions(

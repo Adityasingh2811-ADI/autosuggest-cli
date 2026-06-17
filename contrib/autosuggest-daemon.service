@@ -1,0 +1,14 @@
+[Unit]
+Description=autosuggest-cli telemetry daemon
+Documentation=man:autosuggest(1)
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/autosuggest --daemon
+ExecStop=%h/.local/bin/autosuggest --stop
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

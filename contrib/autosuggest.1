@@ -1,0 +1,79 @@
+.TH AUTOSUGGEST 1 "2026-06-16" "autosuggest-cli 0.1.0" "User Commands"
+.SH NAME
+autosuggest \- context-aware CLI autosuggestion engine
+.SH SYNOPSIS
+.B autosuggest
+[\fIOPTIONS\fR]
+.SH DESCRIPTION
+.B autosuggest
+launches the interactive autosuggestion shell with ghost-text predictions,
+Tab/Shift-Tab completion cycling, and next-step workflow suggestions.
+On first run it automatically starts the telemetry daemon and performs
+any necessary data migration.
+.PP
+The suggestion engine uses frecency scoring (frequency + exponential recency
+decay) combined with directory-context weighting to rank historical commands.
+.SH OPTIONS
+.TP
+.B \-\-daemon
+Run the telemetry daemon in the foreground. Intended for use with systemd
+or other service managers.
+.TP
+.B \-\-daemon\-bg
+Start the daemon in the background and exit immediately.
+.TP
+.B \-\-status
+Print the current daemon status (running/stopped, PID, socket path).
+.TP
+.B \-\-stop
+Stop the running daemon.
+.TP
+.B \-\-version
+Print the version and exit.
+.TP
+.B \-h\fR, \fB\-\-help
+Show usage information and exit.
+.SH FILES
+.TP
+.I $XDG_DATA_HOME/autosuggest/history.db
+Command history database (default: ~/.local/share/autosuggest/history.db).
+.TP
+.I $XDG_CONFIG_HOME/autosuggest/workflows.yaml
+User workflow rules (default: ~/.config/autosuggest/workflows.yaml).
+Falls back to the bundled workflows.yaml shipped with the package.
+.TP
+.I $XDG_RUNTIME_DIR/autosuggest.sock
+Unix domain socket for daemon IPC.
+.TP
+.I $XDG_RUNTIME_DIR/autosuggest.pid
+Daemon PID file.
+.SH ENVIRONMENT
+.TP
+.B XDG_DATA_HOME
+Base directory for user data files (default: ~/.local/share).
+.TP
+.B XDG_CONFIG_HOME
+Base directory for user configuration (default: ~/.config).
+.TP
+.B XDG_RUNTIME_DIR
+Base directory for runtime files (sockets, PIDs). Falls back to
+/tmp/autosuggest-$UID if unset.
+.SH INTERACTIVE SHELL
+.TP
+.B Right Arrow
+Accept ghost-text suggestion.
+.TP
+.B Tab / Shift-Tab
+Cycle through completion menu.
+.TP
+.B 1, 2, 3
+Accept numbered next-step suggestion.
+.TP
+.B Ctrl-D
+Exit the shell.
+.SH SEE ALSO
+.BR suggest\-hook (1),
+.BR suggest\-import (1),
+.BR suggest\-stats (1)
+.SH AUTHORS
+autosuggest-cli contributors.

@@ -7,3 +7,6 @@ build/
 *.db-shm
 *.db-wal
 .claude/
+.coverage
+.pytest_cache/
+*.pid

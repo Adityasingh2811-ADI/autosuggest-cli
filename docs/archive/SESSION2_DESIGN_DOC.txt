@@ -1,0 +1,547 @@
+================================================================================
+              SESSION 2 DESIGN DOCUMENT — NEW FEATURES
+================================================================================
+
+  Project:     cli-autosuggest v0.2.0 → v0.3.0
+  Description: History import, daemon lifecycle management, shell integration
+               hooks, and argument-aware live completions.
+  Date:        2026-06-09
+  Author:      ASingh56 / CLI Tooling Team, Analog Devices
+
+================================================================================
+1. SESSION OVERVIEW
+================================================================================
+
+  This session added four major features to the autosuggest-cli tool:
+
+  A) History Import          — bootstrap suggestions from existing shell history
+  B) Daemon Auto-Lifecycle   — pidfile, start/stop/status, auto-start from shell
+  C) Shell Integration Hooks — record telemetry from real bash/PowerShell shells
+  D) Argument-Aware Suggest  — live context completions (branches, images, etc.)
+
+  Together these take the tool from "demo-ready" to "deployment-ready" by
+  solving the cold-start problem, removing manual daemon management, enabling
+  use without switching shells, and providing intelligent completions that
+  go beyond raw command history.
+
+================================================================================
+2. FEATURE A: HISTORY IMPORT
+================================================================================
+
+  2.1  PURPOSE
+  ------------
+  A fresh install has zero command history, making suggestions useless until
+  the user types enough commands. History import solves this cold-start problem
+  by ingesting existing shell history files.
+
+  2.2  ARCHITECTURE
+  -----------------
+
+    +------------------+       +------------------+       +------------------+
+    | ~/.bash_history  | ----> |                  |       |                  |
+    |                  |       |  importer.py     | ----> |  SQLite DB       |
+    +------------------+       |  (parser +       |       |  command_history |
+                               |   bulk insert)   |       |                  |
+    +------------------+       |                  |       +------------------+
+    | ConsoleHost_     | ----> |                  |
+    | history.txt (PS) |       +------------------+
+    +------------------+
+
+  2.3  SUPPORTED FORMATS
+  ----------------------
+
+    Bash (~/.bash_history):
+    - Plain text, one command per line
+    - Lines starting with # followed by digits are Unix timestamps
+      (bash HISTTIMEFORMAT feature)
+    - Commands shorter than 2 characters are skipped
+
+    PowerShell (ConsoleHost_history.txt):
+    - Located at ~/AppData/Roaming/Microsoft/Windows/PowerShell/
+      PSReadLine/ConsoleHost_history.txt
+    - Plain text, one command per line
+    - Multi-line commands use backtick (`) continuation
+    - Commands shorter than 2 characters are skipped
+
+  2.4  TIMESTAMP STRATEGY
+  -----------------------
+  For entries with explicit timestamps (bash #epoch lines), the actual
+  timestamp is preserved. For entries without timestamps, synthetic
+  timestamps are spread evenly across a 30-day window ending at the
+  file's modification time:
+
+    synthetic_ts = (file_mtime - 30_days) + (index / total) * 30_days
+
+  This ensures frecency decay produces varied scores rather than all
+  imported commands scoring identically.
+
+  2.5  BULK INSERT PERFORMANCE
+  ----------------------------
+  - Batch size: 1000 rows per transaction
+  - Uses daemon.init_db() for connection setup (WAL mode, schema creation)
+  - Insert includes explicit timestamp column (overrides SQLite DEFAULT)
+  - All entries get: cwd="~" (unknown), exit_status=0 (assumed success)
+
+  2.6  CLI INTERFACE
+  ------------------
+
+    suggest-import                           Auto-detect all history files
+    suggest-import --bash PATH              Import specific bash history
+    suggest-import --powershell PATH        Import specific PS history
+    suggest-import --help                   Show usage
+
+  2.7  ENTRY POINT
+  ----------------
+    pyproject.toml: suggest-import = "autosuggest.importer:run_import"
+
+  2.8  FILES
+  ----------
+    NEW: src/autosuggest/importer.py
+
+================================================================================
+3. FEATURE B: DAEMON AUTO-LIFECYCLE
+================================================================================
+
+  3.1  PURPOSE
+  ------------
+  Previously the daemon required manual start with `suggest-daemon` and had
+  no way to check status or stop gracefully. Users had to remember to start
+  it, and couldn't tell if it was already running.
+
+  3.2  PIDFILE MANAGEMENT
+  -----------------------
+  Location: ~/.cli_autosuggest.pid (matches DB naming convention)
+
+  Lifecycle:
+    1. On start: check if PID in pidfile is alive
+       - If alive: print "already running (PID X)", exit
+       - If dead/missing: proceed with startup
+    2. After socket binds: write current PID to pidfile
+    3. On shutdown (finally block): remove pidfile
+    4. On status check: read pidfile, verify process is alive
+
+  Process liveness detection:
+    - Windows: `tasklist /FI "PID eq {pid}"`, check output
+    - Unix: `os.kill(pid, 0)` (signal 0 = test existence)
+
+  3.3  SUBCOMMAND ROUTING
+  -----------------------
+
+    suggest-daemon              Same as "start" (backward compatible)
+    suggest-daemon start        Start daemon, write pidfile
+    suggest-daemon stop         Read pidfile, kill process, remove pidfile
+    suggest-daemon status       Report running/not-running + connection info
+    suggest-daemon --help       Show usage
+
+  3.4  STOP MECHANISM
+  -------------------
+    - Windows: subprocess.run(["taskkill", "/PID", str(pid), "/F"])
+    - Unix: os.kill(pid, signal.SIGTERM)
+    - Pidfile removed after successful termination
+
+  3.5  AUTO-START FROM SHELL
+  --------------------------
+  When the `suggest` shell launches, it calls _ensure_daemon():
+
+    1. Check is_daemon_running() (pidfile + process alive)
+    2. If not running, spawn detached subprocess:
+       - Windows: CREATE_NO_WINDOW | DETACHED_PROCESS flags
+       - Unix: start_new_session=True
+       - stdout/stderr → DEVNULL
+    3. Print "[auto-started daemon]" on success
+    4. Failure is silent — shell works without daemon (no telemetry recording)
+
+  3.6  FILES
+  ----------
+    MODIFIED: src/autosuggest/daemon.py  (pidfile, subcommands, is_daemon_running)
+    MODIFIED: src/autosuggest/main.py    (_ensure_daemon at startup)
+
+================================================================================
+4. FEATURE C: SHELL INTEGRATION HOOKS
+================================================================================
+
+  4.1  PURPOSE
+  ------------
+  Most engineers will not switch from their real shell to a custom Python
+  REPL. Shell hooks allow telemetry recording in the user's native shell
+  (bash or PowerShell) without requiring any workflow change.
+
+  4.2  ARCHITECTURE
+  -----------------
+
+    User's Real Shell                    Autosuggest Daemon
+    +-------------------+                +------------------+
+    | bash / PowerShell |  -- JSON -->   | TCP :19526       |
+    | PROMPT_COMMAND /  |  fire-and-     | (same protocol   |
+    | prompt override   |  forget        |  as suggest TUI) |
+    +-------------------+                +------------------+
+
+  The hooks inject a function that runs after every command execution
+  (PROMPT_COMMAND in bash, prompt function override in PowerShell).
+  They capture command text, working directory, and exit status, then
+  send the same JSON payload the TUI shell uses.
+
+  4.3  BASH HOOK DETAILS
+  ----------------------
+  Injection point: PROMPT_COMMAND (runs before each prompt display)
+
+  Mechanism:
+    1. Capture exit status: local exit_status=$?
+    2. Get last command: history 1 | sed (strip history number)
+    3. Dedup check: skip if same as last recorded command
+    4. JSON-escape command and cwd (backslashes, double quotes)
+    5. Send via /dev/tcp/127.0.0.1/19526 (bash builtin, no dependencies)
+    6. Fallback: python3 -c socket one-liner if /dev/tcp unavailable
+    7. Fire-and-forget: backgrounded (&), errors silenced (2>/dev/null)
+
+  Anti-duplicate: Tracks $_autosuggest_last_hist to avoid recording the
+  same command twice in one prompt cycle.
+
+  Self-install guard: Checks PROMPT_COMMAND doesn't already contain
+  "_autosuggest_hook" before prepending.
+
+  4.4  POWERSHELL HOOK DETAILS
+  ----------------------------
+  Injection point: global prompt function override
+
+  Mechanism:
+    1. Read last history entry: Get-History -Count 1
+    2. Dedup check: skip if history ID matches last recorded
+    3. Determine exit status from ExecutionStatus property
+    4. JSON-escape command and cwd
+    5. Send via Start-Job with .NET TcpClient (non-blocking)
+    6. ConnectAsync with 100ms timeout (fire-and-forget)
+    7. Preserves original prompt function (calls it after telemetry)
+
+  Anti-duplicate: Tracks $global:_AutosuggestLastHistId by history entry ID.
+
+  4.5  CLI INTERFACE
+  ------------------
+
+    suggest-hook bash              Print bash hook to stdout
+    suggest-hook powershell        Print PowerShell hook to stdout
+    suggest-hook install bash      Append source line to ~/.bashrc
+    suggest-hook install powershell  Append source line to $PROFILE
+    suggest-hook --help            Show usage
+
+  Install is idempotent — checks if the source line already exists before
+  appending.
+
+  4.6  USER SETUP (ONE-TIME)
+  --------------------------
+
+    Bash:
+      echo 'eval "$(suggest-hook bash)"' >> ~/.bashrc
+      source ~/.bashrc
+
+    PowerShell:
+      suggest-hook install powershell
+      # Restart PowerShell or: . $PROFILE
+
+  4.7  ENTRY POINT
+  ----------------
+    pyproject.toml: suggest-hook = "autosuggest.hooks:run_hook"
+
+  4.8  FILES
+  ----------
+    NEW: src/autosuggest/hooks.py
+
+================================================================================
+5. FEATURE D: ARGUMENT-AWARE SUGGESTIONS
+================================================================================
+
+  5.1  PURPOSE
+  ------------
+  The frecency engine suggests full historical commands by prefix. But when
+  a user types "git checkout ", they want actual branch names from the
+  current repo — not just previously typed checkout commands. Argument-aware
+  completions shell out to live tools to provide context-specific suggestions.
+
+  5.2  ARCHITECTURE
+  -----------------
+
+    User Input          Completer Logic              Tool Subprocess
+    +-----------+       +-------------------+        +--------------+
+    | "git ch"  | ----> | Frecency engine   | -----> | History DB   |
+    +-----------+       | (prefix match)    |        +--------------+
+                        +-------------------+
+
+    +-----------+       +-------------------+        +--------------+
+    | "git      | ----> | Arg completer     | -----> | git branch   |
+    |  checkout | ----> | (pattern match +  |        | subprocess   |
+    |  fe"      |       |  subprocess)      |        +--------------+
+    +-----------+       +-------------------+
+
+  Priority: If input matches an arg-completer pattern, live completions
+  are shown FIRST. If no pattern matches, falls through to frecency.
+
+  5.3  SUPPORTED COMPLETERS
+  -------------------------
+
+  +----------------------------+--------------------------------------------+
+  | Command Prefix             | Resolver                                   |
+  +----------------------------+--------------------------------------------+
+  | git checkout <arg>         | git branch --format='%(refname:short)'     |
+  | git switch <arg>           | git branch --format='%(refname:short)'     |
+  | git merge <arg>            | git branch --format='%(refname:short)'     |
+  | git rebase <arg>           | git branch --format='%(refname:short)'     |
+  | git branch -d <arg>        | git branch --format='%(refname:short)'     |
+  | git branch -D <arg>        | git branch --format='%(refname:short)'     |
+  | git push <arg>             | git remote                                 |
+  | git pull <arg>             | git remote                                 |
+  | git fetch <arg>            | git remote                                 |
+  | git tag -d <arg>           | git tag --list                             |
+  | docker run <arg>           | docker images --format (repo:tag)          |
+  | docker rmi <arg>           | docker images --format (repo:tag)          |
+  | docker exec <arg>          | docker ps --format (names)                 |
+  | docker stop <arg>          | docker ps --format (names)                 |
+  | docker logs <arg>          | docker ps --format (names)                 |
+  | docker rm <arg>            | docker ps --format (names)                 |
+  | docker restart <arg>       | docker ps --format (names)                 |
+  | make <arg>                 | parse Makefile for target lines            |
+  | pip install <arg>          | python -m pip list --format=freeze         |
+  | pip uninstall <arg>        | python -m pip list --format=freeze         |
+  | pip show <arg>             | python -m pip list --format=freeze         |
+  +----------------------------+--------------------------------------------+
+
+  5.4  CACHING STRATEGY
+  ---------------------
+  Results are cached per (resolver_key, cwd) pair with a 5-second TTL.
+
+  Rationale:
+    - Branch list doesn't change between keystrokes
+    - Docker container list is relatively stable within 5 seconds
+    - Makefile targets change only on file save
+    - Avoids spawning subprocess on every character typed
+    - Cache is in-memory (dict), cleared on process exit
+
+  Cache key format: "{resolver_name}:{cwd}"
+  Example: "git-branches:/home/user/project"
+
+  5.5  TIMEOUT STRATEGY
+  ---------------------
+  - Default subprocess timeout: 500ms (git, docker, make)
+  - Pip timeout: 2000ms (pip list is slower due to package metadata)
+  - If a subprocess times out, returns empty list (graceful fallback)
+  - If a tool is not installed (FileNotFoundError), returns empty list
+
+  This ensures the completion UI never visibly lags, even if a tool is
+  slow or missing.
+
+  5.6  FILTERING
+  --------------
+  After the resolver returns candidates, they are filtered by the partial
+  argument the user has already typed:
+
+    Input: "git checkout fe"
+    Prefix: "git checkout "
+    Partial arg: "fe"
+    Candidates: ["main", "feature/auth", "feature/api", "bugfix/123"]
+    Filtered: ["feature/auth", "feature/api"]  (starts with "fe", case-insensitive)
+
+  5.7  INTEGRATION POINTS
+  -----------------------
+
+  FrecencyCompleter.get_completions() (Tab menu):
+    1. Call get_arg_completions(text, cwd)
+    2. If results: yield Completions with display_meta="(source)" tag
+    3. If empty: fall through to frecency engine as before
+
+  FrecencyAutoSuggest.get_suggestion() (ghost-text):
+    1. Call get_arg_completions(text, cwd)
+    2. If results: use first match as ghost-text suggestion
+    3. If empty: fall through to frecency engine as before
+
+  5.8  MAKE TARGET PARSING
+  ------------------------
+  Instead of shelling out, the Make completer reads the Makefile directly:
+
+    Regex: ^([a-zA-Z_][a-zA-Z0-9_.-]*):
+    - Matches lines that define targets (name followed by colon)
+    - Excludes targets starting with "." (internal/phony markers)
+    - Checks both "Makefile" and "makefile" (case variation)
+
+  5.9  ENTRY POINT
+  ----------------
+  No separate CLI entry point — integrated directly into the suggest TUI
+  via FrecencyCompleter and FrecencyAutoSuggest.
+
+  5.10 FILES
+  ----------
+    NEW: src/autosuggest/arg_completers.py
+    MODIFIED: src/autosuggest/main.py
+
+================================================================================
+6. UPDATED PROJECT STRUCTURE
+================================================================================
+
+  C:\Users\ASingh56\autosuggest-cli\
+  ├── src/autosuggest/
+  │   ├── __init__.py            Package marker
+  │   ├── main.py                Interactive shell (TUI) + auto-start daemon
+  │   ├── engine.py              Frecency prediction engine
+  │   ├── daemon.py              Telemetry daemon + lifecycle (start/stop/status)
+  │   ├── next_steps.py          Hybrid next-step resolver
+  │   ├── importer.py        [NEW] History import (bash + PowerShell)
+  │   ├── hooks.py           [NEW] Shell integration hooks (bash + PowerShell)
+  │   ├── arg_completers.py  [NEW] Argument-aware live completions
+  │   ├── workflows.yaml         Predefined workflow rules
+  │   └── schema.sql             SQLite schema
+  ├── pyproject.toml             Entry points + dependencies
+  ├── DESIGN_DOC.txt             Original architecture document
+  ├── NEXT_STEPS_FEATURE_DOC.txt Feature documentation (v0.2.0)
+  └── SESSION2_DESIGN_DOC.txt    This document (v0.3.0)
+
+================================================================================
+7. UPDATED ENTRY POINTS
+================================================================================
+
+  +-------------------+--------------------------------------+------------------+
+  | Command           | Target                               | Purpose          |
+  +-------------------+--------------------------------------+------------------+
+  | suggest           | autosuggest.main:run                 | Interactive shell|
+  | suggest-daemon    | autosuggest.daemon:run_daemon        | Daemon lifecycle |
+  | suggest-import    | autosuggest.importer:run_import      | History import   |
+  | suggest-hook      | autosuggest.hooks:run_hook           | Shell hook setup |
+  +-------------------+--------------------------------------+------------------+
+
+================================================================================
+8. TELEMETRY PROTOCOL (UNCHANGED)
+================================================================================
+
+  All telemetry sources (TUI shell, bash hook, PowerShell hook) send the
+  same JSON payload to the same endpoint:
+
+  Transport: TCP 127.0.0.1:19526 (Windows) | Unix socket (Linux/macOS)
+  Format:    {"command": "...", "cwd": "...", "exit_status": 0}
+  Timeout:   100ms (fire-and-forget)
+  Failure:   Silent drop (shell never blocks on daemon availability)
+
+  This means all three telemetry sources are interchangeable — the daemon
+  doesn't know or care which shell sent the data.
+
+================================================================================
+9. DEPENDENCY MATRIX
+================================================================================
+
+  +---------------------+-------------------+----------------------------------+
+  | Feature             | Dependencies      | Notes                            |
+  +---------------------+-------------------+----------------------------------+
+  | History Import      | sqlite3 (stdlib)  | Reuses daemon.init_db()          |
+  | Daemon Lifecycle    | signal (stdlib)   | Platform-aware kill/tasklist      |
+  | Shell Hooks (bash)  | /dev/tcp OR python| No pip dependencies              |
+  | Shell Hooks (PS)    | .NET TcpClient    | Built into PowerShell runtime    |
+  | Arg Completers      | subprocess        | Requires git/docker/make/pip     |
+  |                     | (stdlib)          | on PATH; graceful if missing     |
+  +---------------------+-------------------+----------------------------------+
+
+  No new pip dependencies were added. All features use Python stdlib only.
+
+================================================================================
+10. PERFORMANCE CHARACTERISTICS
+================================================================================
+
+  10.1  HISTORY IMPORT
+  --------------------
+  - 173 PowerShell commands imported in <1 second
+  - Batch inserts (1000/txn) scale to 100K+ entries
+  - SQLite WAL mode allows concurrent reads during import
+
+  10.2  DAEMON LIFECYCLE
+  ----------------------
+  - Pidfile check: <1ms (file read + process signal)
+  - Auto-start: ~200ms (subprocess spawn, non-blocking)
+  - Stop: <100ms (taskkill/SIGTERM + pidfile removal)
+
+  10.3  SHELL HOOKS
+  -----------------
+  - Bash hook overhead per command: <5ms (printf + /dev/tcp)
+  - PowerShell hook overhead: <10ms (Start-Job is non-blocking)
+  - Both fire-and-forget: zero impact on command execution time
+
+  10.4  ARGUMENT-AWARE COMPLETIONS
+  --------------------------------
+  - First call (cache miss): 50-500ms depending on tool
+  - Subsequent calls (cache hit): <1ms for 5 seconds
+  - Timeout protection: 500ms (general) / 2000ms (pip)
+  - Worst case (tool not installed): immediate empty return
+
+================================================================================
+11. ERROR HANDLING PHILOSOPHY
+================================================================================
+
+  All new features follow the same principle: NEVER block the user.
+
+  - History import fails?     Print error, continue with other files
+  - Daemon won't start?       Shell works without telemetry
+  - Shell hook can't connect? Silently drop (catch block, no output)
+  - Subprocess times out?     Return empty list, fall through to frecency
+  - Tool not installed?       Return empty list, no error shown
+  - Pidfile stale?            Detect dead PID, clean up, allow restart
+
+  The tool degrades gracefully at every layer. A fully working system
+  provides maximum value; a partially broken system still provides some.
+
+================================================================================
+12. SECURITY CONSIDERATIONS
+================================================================================
+
+  12.1  SHELL HOOKS
+  -----------------
+  - Hooks run in the user's shell context (same privileges)
+  - JSON payload only contains: command text, directory, exit code
+  - No sensitive data (passwords, tokens) unless the user typed them
+    as plain text in a command (same risk as .bash_history)
+  - TCP connection is localhost-only (127.0.0.1), not externally exposed
+
+  12.2  SUBPROCESS EXECUTION
+  --------------------------
+  - Arg completers use explicit argument lists (no shell=True)
+  - No user input is passed to shell interpretation
+  - Subprocess timeout prevents resource exhaustion
+
+  12.3  PIDFILE
+  -------------
+  - Written to user's home directory (user-owned)
+  - Contains only a PID number (no sensitive data)
+  - Stale pidfile detection prevents PID-reuse confusion
+
+================================================================================
+13. TESTING RESULTS
+================================================================================
+
+  All features verified working in this session:
+
+  [PASS] suggest-import auto-detected PowerShell history (173 commands)
+  [PASS] suggest-daemon status reports "not running" when stopped
+  [PASS] suggest-daemon start creates pidfile, daemon listens on :19526
+  [PASS] suggest-daemon status reports "running (PID X)" when active
+  [PASS] suggest-daemon stop terminates process, removes pidfile
+  [PASS] suggest-hook bash prints valid bash script
+  [PASS] suggest-hook powershell prints valid PowerShell script
+  [PASS] suggest-hook --help shows usage information
+  [PASS] Arg completer: "git checkout " returns branch "main"
+  [PASS] Arg completer: "git checkout m" filters to "main"
+  [PASS] Arg completer: "pip install " returns 6 installed packages
+  [PASS] Arg completer: "pip install p" filters to 3 packages
+  [PASS] Arg completer: "make " returns empty (no Makefile) gracefully
+  [PASS] Arg completer: "docker run " returns empty (no Docker) gracefully
+  [PASS] Arg completer: unmatched prefix returns empty (frecency fallback)
+  [PASS] All modules import without error
+  [PASS] All entry points resolve correctly after pip install -e .
+
+================================================================================
+14. FUTURE WORK (NOT IN THIS SESSION)
+================================================================================
+
+  - Fuzzy/substring matching in frecency engine
+  - Data retention / pruning (90-day TTL or top-N per directory)
+  - Daemon authentication (shared secret token)
+  - Per-project workflows.yaml discovery
+  - Failure-aware suggestions (recovery commands after non-zero exit)
+  - Multi-word completion (commit message patterns)
+  - Configuration file (~/.config/autosuggest/config.toml)
+  - Test suite (pytest)
+  - suggest --status diagnostic command
+
+================================================================================
