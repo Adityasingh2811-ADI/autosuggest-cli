@@ -174,14 +174,23 @@ _autosuggest_right() {
 }
 
 # Frecency-aware Tab completion: merge daemon suggestions with default results.
+# Suggestions from the engine are full command lines, but bash replaces only
+# the current word. Strip the line-prefix before the current word from each
+# suggestion so the completion extends the line instead of duplicating words.
 _autosuggest_complete() {
-    local cur="${COMP_LINE:0:$COMP_POINT}"
-    if [ ${#cur} -ge 2 ] && [ -n "$_autosuggest_python" ]; then
-        local mapfile_results
-        while IFS= read -r line; do
-            [ -n "$line" ] && COMPREPLY+=("$line")
-        done < <(_autosuggest_query "$cur")
-    fi
+    local line="${COMP_LINE:0:$COMP_POINT}"
+    [ ${#line} -lt 2 ] && return
+    [ -z "$_autosuggest_python" ] && return
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    local before="${line%"$cur"}"
+    local sugg
+    while IFS= read -r sugg; do
+        [ -z "$sugg" ] && continue
+        case "$sugg" in
+            "$line"*) COMPREPLY+=("${sugg#"$before"}") ;;
+        esac
+    done < <(_autosuggest_query "$line")
+    [ ${#COMPREPLY[@]} -gt 0 ] && compopt -o nospace 2>/dev/null
 }
 
 # Start daemon on shell init (runs once per session, daemon persists across sessions)
