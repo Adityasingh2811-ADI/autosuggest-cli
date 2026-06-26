@@ -10,3 +10,8 @@ build/
 .coverage
 .pytest_cache/
 *.pid
+
+# local presentation / demo artifacts (not part of the tool)
+scripts/
+DEMO_SCRIPT.txt
+PPT_OUTLINE.md

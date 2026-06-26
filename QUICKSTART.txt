@@ -1,0 +1,136 @@
+autosuggest-cli — Easy Start Guide
+==================================
+
+What is this? (one sentence)
+----------------------------
+It quietly remembers the commands you type, then suggests them back to you
+later — so you type less and don't have to remember long commands.
+
+You do NOT need to be technical to use it. The easiest way is a little
+helper window called "suggest". You start it, type your commands inside it,
+and it suggests as you go. That's it.
+
+
+THE WHOLE PIPELINE — copy these 3 lines, top to bottom
+======================================================
+
+  Step 1 — Install it (one time only)
+  -----------------------------------
+    pip install --user git+https://github.com/Adityasingh2811-ADI/autosuggest-cli.git
+
+    (If your computer says "suggest: command not found" afterwards, see the
+     "If a command isn't found" note at the very bottom.)
+
+  Step 2 — Teach it your past commands (one time, optional but nice)
+  -----------------------------------------------------------------
+    suggest-import
+
+    This reads the history of commands you've already typed and loads them
+    in, so you get useful suggestions immediately instead of starting blank.
+
+  Step 3 — Start using it
+  -----------------------
+    suggest
+
+    A new prompt opens. This is your helper window. Type commands here just
+    like you normally would. Type "exit" (or press Ctrl+D) to leave it.
+
+That's the entire setup. Step 1 and 2 are once. From then on, you only ever
+run "suggest" (Step 3) when you want help.
+
+
+INSIDE THE "suggest" WINDOW — what you'll see and do
+====================================================
+
+  * Start typing, and grey "ghost" text appears ahead of your cursor — that's
+    its best guess at the full command.
+        -> Press the Right Arrow (->) to accept the grey suggestion.
+        -> Or just keep typing to ignore it.
+
+  * Press Tab to see a little menu of ranked suggestions.
+        -> Tab again / Shift+Tab to move through the choices.
+        -> Enter to pick the highlighted one.
+
+  * Press Enter to run a command, exactly like a normal terminal.
+
+  * After a command runs, you may see a short "Next steps:" list — the
+    commands that usually come next.
+        -> Type the number (1, 2, or 3) to run that suggested next command.
+
+  * Moving between folders works normally:  type  cd foldername
+    It remembers which commands you use in which folder, and suggests
+    accordingly.
+
+  The more you use it, the smarter the suggestions get. There is nothing to
+  configure — it learns on its own.
+
+
+HANDY EXTRA COMMANDS (run these in your normal terminal)
+========================================================
+
+    suggest              Open the helper window (your main command).
+    suggest-import       Re-load your shell history (safe to run again).
+    suggest-stats        Show a friendly dashboard: how many commands it
+                         knows, your success rate, most-used commands, etc.
+    suggest-daemon status   Check that the background recorder is running.
+
+You usually only ever need the first one, "suggest".
+
+
+TURN IT OFF / BACK ON
+=====================
+    To pause it:    touch ~/.no_autosuggest
+    To re-enable:   rm ~/.no_autosuggest
+
+Your saved history is never deleted by this — it just stops suggesting.
+
+
+FREQUENTLY ASKED
+================
+  Q: Do I have to change my shell settings or edit any files?
+  A: No. For the "suggest" window, nothing needs editing. Install, import,
+     run. Done.
+
+  Q: Will it run my commands without asking?
+  A: No. Nothing runs until you press Enter, just like a normal terminal.
+
+  Q: It showed "0.00" next to a suggestion — what's that?
+  A: That's just a relevance score. 0.00 means you used it a while ago; it
+     goes up again as you use the command. You can ignore it.
+
+  Q: Where is my data stored?
+  A: Only on your own machine, in a local file. Nothing is uploaded.
+
+
+IF A COMMAND ISN'T FOUND ("suggest: command not found")
+=======================================================
+The installer put the programs in a folder your terminal doesn't check yet.
+Tell it where to look, then refresh:
+
+    bash / zsh:   export PATH="$HOME/.local/bin:$PATH"
+    tcsh / csh:   set path = ( $HOME/.local/bin $path ) ; rehash
+
+Then run "suggest" again. (To make it stick, add that one line to your
+~/.bashrc, ~/.zshrc, or ~/.tcshrc.)
+
+
+ADVANCED (optional) — suggestions inside your REAL shell
+========================================================
+The "suggest" window above is all most people need. If you'd rather have
+suggestions appear directly at your normal prompt (no separate window), you
+can load a "hook" for your shell. Pick the line for YOUR shell — they are NOT
+interchangeable:
+
+    bash :        eval "$(suggest-hook bash)"        # add to ~/.bashrc
+    zsh  :        eval "$(suggest-hook zsh)"         # add to ~/.zshrc
+    tcsh / csh :  eval `suggest-hook tcsh`           # add to ~/.tcshrc  (BACKTICKS!)
+    PowerShell :  suggest-hook install powershell
+
+  WARNING for tcsh/csh users: do NOT use the bash line. csh/tcsh cannot
+  understand $(...) and will error with "Illegal variable name". Use the
+  backtick version shown above.
+
+On managed EDA-CAD hosts (tcsh login), the simplest option is the one-shot
+installer, which sets everything up for you:
+
+    bash install-linux.sh

@@ -21,17 +21,95 @@ pip install git+https://github.com/Adityasingh2811-ADI/autosuggest-cli.git
 
 Requires Python 3.10+.
 
-## Quick Start
+### Managed Linux hosts (Exceed TurboX / EDA-CAD farms) — one-shot install
+
+On managed ADI hosts the login shell is csh/tcsh, the system Python is too
+old, Perforce comes from environment modules, and the system dotfiles are
+read-only. A single idempotent script handles all of that. Run it **once**:
 
 ```bash
-# 1. Import your existing shell history (optional but recommended)
-suggest-import
+# from a clone of this repo:
+bash install-linux.sh
 
-# 2. Launch the interactive shell
-suggest
+# or straight from GitHub, no clone needed:
+curl -fsSL https://raw.githubusercontent.com/Adityasingh2811-ADI/autosuggest-cli/master/install-linux.sh | bash
 ```
 
-The daemon starts automatically when you launch `suggest`. Suggestions improve as you use it.
+It loads the right Python module, `pip install --user`s the package, writes
+`~/.suggest_bashrc` (Modules init → `module load` Python + Perforce →
+re-adds `~/.local/bin` to PATH → activates the hook), and adds an idempotent
+auto-launch block to `~/.cshrc.user` so every interactive login drops you
+into a hooked bash with `p4` already working. No further changes are needed.
+
+Re-running the script is safe (it never duplicates dotfile entries). Useful
+overrides:
+
+```bash
+PY_MODULE=python/adi/3.12.2 \
+P4_MODULES="perforce/adi/r19.1 p4v/adi/p4v-2024.1.2591061" \
+NO_AUTOLAUNCH=1 \
+  bash install-linux.sh        # NO_AUTOLAUNCH keeps csh as login shell;
+                               # start the tool manually with 'suggest-start'
+```
+
+Kill switch (no reinstall required):
+
+```bash
+touch ~/.no_autosuggest   # disable auto-bash on next login
+rm    ~/.no_autosuggest   # re-enable
+exec tcsh -f              # drop to plain csh for the current session
+```
+
+See [BASH_PORTING_NOTES.txt](BASH_PORTING_NOTES.txt) for the full rationale.
+
+## Quick Start
+
+**First, know your login shell** — the setup differs, and the most common
+mistake is running a bash line in csh/tcsh:
+
+```bash
+echo $0        # or:  ps -p $$ -o comm=
+```
+
+### Step 1 — bootstrap the engine (any shell)
+
+```bash
+suggest-import     # import existing history (optional, recommended)
+suggest            # launch the interactive REPL — works in ANY shell
+```
+
+`suggest` is a self-contained REPL with inline ghost-text. It works everywhere
+(bash, zsh, **tcsh**, PowerShell) and needs no hook, so it's the fastest way to
+start. The daemon auto-starts; suggestions improve as you use it.
+
+### Step 2 — hook your real shell (optional, for suggestions at your normal prompt)
+
+Pick the line that matches your shell. **The syntax is not interchangeable.**
+
+| Login shell | Add this to your rc file |
+|---|---|
+| **bash** | `eval "$(suggest-hook bash)"` &nbsp;→ `~/.bashrc` |
+| **zsh** | `eval "$(suggest-hook zsh)"` &nbsp;→ `~/.zshrc` |
+| **tcsh / csh** | `` eval `suggest-hook tcsh` `` &nbsp;→ `~/.tcshrc` *(backticks!)* |
+| **PowerShell** | `suggest-hook install powershell` |
+
+> ⚠️ **csh/tcsh users:** do **not** run `eval "$(suggest-hook bash)"`. csh/tcsh
+> cannot parse `$(...)` and it fails with `Illegal variable name`. Use the
+> backtick line above, or let the installer do it for you (below).
+
+### Managed EDA-CAD host (Exceed TurboX, tcsh login)? Skip the steps above
+
+Run the one-shot installer — it's a plain command tcsh runs fine (no `$(...)`),
+and it loads Python, puts `~/.local/bin` on PATH, and writes the correct hook
+into your dotfiles so suggestions just work on next login:
+
+```bash
+bash install-linux.sh
+```
+
+See [Managed Linux hosts](#managed-linux-hosts-exceed-turbox--eda-cad-farms--one-shot-install)
+above for details and options.
+
 
 ## Usage
 
@@ -88,6 +166,24 @@ suggest-hook install zsh
 The zsh hook adds true inline ghost-text (accept with `Right Arrow` or
 `Ctrl+F`) plus frecency completion and next-step suggestions.
 
+**tcsh / csh** (common on managed EDA-CAD hosts):
+```tcsh
+# Add to ~/.tcshrc — note the BACKTICKS, not $(...):
+eval `suggest-hook tcsh`
+
+# Or auto-install (also adds ~/.local/bin to PATH):
+suggest-hook install tcsh
+```
+
+> ⚠️ **csh/tcsh cannot parse `$(...)`.** Running the bash line
+> `eval "$(suggest-hook bash)"` in tcsh fails with `Illegal variable name`.
+> In tcsh you **must** use backticks: `` eval `suggest-hook tcsh` ``.
+> The tcsh hook records telemetry and prints next-step suggestions; it does
+> **not** provide inline ghost-text or Tab completion (tcsh has no
+> programmable line editor — use the `suggest` REPL or the zsh hook for that).
+> On a managed host, prefer the [one-shot installer](#managed-linux-hosts-exceed-turbox--eda-cad-farms--one-shot-install),
+> which wires everything up for you so you never hand-type a hook line.
+
 **PowerShell:**
 ```powershell
 # Auto-install to $PROFILE:
@@ -104,6 +200,10 @@ suggest-import --bash ~/.bash_history
 suggest-import --zsh ~/.zsh_history
 suggest-import --powershell PATH
 ```
+
+> If `suggest-import: Command not found` in tcsh, the pip `--user` scripts
+> aren't on your `PATH` yet. Fix it with:
+> `set path = ( $HOME/.local/bin $path ); rehash`
 
 ## How It Works
 

@@ -1,0 +1,38 @@
+==================  autosuggest-cli — START HERE  ==================
+
+It suggests commands based on what you've typed before. Setup is 2 lines.
+
+
+STEP 1 — Install (one time):
+
+    pip install --user git+https://github.com/Adityasingh2811-ADI/autosuggest-cli.git
+
+
+STEP 2 — Run:
+
+    suggest
+
+
+That's it. A helper window opens. Use it like a normal terminal:
+
+    * Grey text = a suggestion.  Press  Right Arrow (->)  to accept it.
+    * Press  Enter  to run a command.
+    * Press  Tab  to see more suggestions.
+    * Type  exit  to leave.
+
+The more you use it, the smarter it gets.
+
+
+----------------------------------------------------------------------
+Optional, nice to have:
+
+  Load your old commands so it's useful immediately (run once):
+      suggest-import
+
+  If you ever see "suggest: command not found", run ONE of these, then
+  try again:
+      bash / zsh :   export PATH="$HOME/.local/bin:$PATH"
+      tcsh / csh :   set path = ( $HOME/.local/bin $path ) ; rehash
+
+Need more detail? See QUICKSTART.txt.
+======================================================================

@@ -1,0 +1,415 @@
+================================================================================
+        AUTOSUGGEST-CLI — BASH / LINUX PORTING NOTES
+        (Bringing the PowerShell experience to the Linux bash client)
+================================================================================
+
+  Date:    2026-06-17
+  Author:  ASingh56 / CLI Tooling Team, Analog Devices
+  Scope:   Why the PowerShell feature set did not translate 1:1 to bash,
+           the specific problems hit while deploying on a managed Linux
+           host (Exceed TurboX), and why users must switch from csh to
+           bash to use the tool.
+
+================================================================================
+0. TL;DR
+================================================================================
+
+  - PowerShell gives us a rich, supported prediction API (PSReadLine
+    ICommandPredictor). Bash has no equivalent, so feature parity had to
+    be re-engineered with different primitives — and one feature (live
+    inline ghost text) is not achievable in stock bash at all.
+  - The original bash hook was telemetry-only and had a real bug: its
+    background socket send was not disowned and got suspended by the
+    shell ("[1]+ Stopped ... socat").
+  - On the managed Linux host we also hit environment problems unrelated
+    to the code: a too-old system Python (3.6), non-persistent settings
+    (root-owned ~/.cshrc), and a csh/tcsh login shell that the hook does
+    not support.
+  - Resolution: a hardened, feature-richer bash hook; a new zsh hook for
+    true inline ghost text; and a documented per-session bootstrap that
+    loads a modern Python and drops the user into bash.
+
+================================================================================
+1. STARTING POINT: WHAT POWERSHELL GAVE US "FOR FREE"
+================================================================================
+
+  The PowerShell hook leans on platform features that simply do not exist
+  in bash:
+
+    PowerShell feature                 Underlying capability
+    ------------------                 ---------------------
+    Inline ghost text                  PSReadLine ICommandPredictor
+                                       (a first-class, supported plugin
+                                       API for inline predictions)
+    Accept inline prediction           [PSConsoleReadLine]::AcceptSuggestion
+    Per-keystroke buffer access        GetBufferState / Replace / SetCursor
+    Tab menu augmentation              TabExpansion2 override
+    Next-step display                  prompt function override
+    Background telemetry               Start-Job
+
+  Crucially, ICommandPredictor lets us return suggestions that PSReadLine
+  renders as greyed-out inline text that updates on every keystroke,
+  without us having to manage the terminal display ourselves.
+
+================================================================================
+2. THE CORE PROBLEM: BASH HAS NO PREDICTION API
+================================================================================
+
+  Bash's line editor is GNU Readline. Readline has NO supported API for
+  "show greyed-out inline text that updates as the user types." The reason
+  third-party tools like ble.sh or fish achieve live ghost text is that
+  they REPLACE the line editor entirely.
+
+  Why we can't fake it reliably in stock bash:
+
+    1. `bind -x` callbacks run a shell function on a keypress, but AFTER
+       the callback returns, Readline REDRAWS the input line. Any VT
+       escape sequence we print to draw a ghost is immediately clobbered
+       by that redraw.
+    2. There is no public hook that fires "after the line is redrawn but
+       before the next keypress" where we could safely paint a ghost.
+    3. READLINE_LINE / READLINE_POINT are only exposed inside `bind -x`
+       widgets, and writing to them moves the real buffer — they cannot
+       represent a separate, non-committed suggestion overlay.
+
+  CONCLUSION: live inline ghost text is NOT achievable in stock bash. We
+  deliberately did not ship a fragile hack that flickers or corrupts the
+  prompt.
+
+================================================================================
+3. HOW WE ACHIEVED PARITY (FEATURE-BY-FEATURE)
+================================================================================
+
+  Instead of copying the implementation, we matched the VALUE of each
+  PowerShell feature using bash-native primitives:
+
+    Goal                         PowerShell             Bash approach
+    ----                         ----------             -------------
+    Accept top suggestion        Right-arrow / Ctrl+F   `bind -x` widgets
+                                 (AcceptSuggestion)     that read the line
+                                                        with READLINE_LINE,
+                                                        query the engine,
+                                                        and rewrite the
+                                                        buffer. Bound to
+                                                        Ctrl+F and Right-
+                                                        arrow (at EOL).
+    Live inline ghost text       ICommandPredictor      NOT possible in
+                                                        bash (see sec. 2).
+                                                        Delivered via zsh
+                                                        instead (sec. 5).
+    Tab menu augmentation        TabExpansion2          `complete -D`
+                                 override               default completion
+                                                        that injects
+                                                        frecency results.
+    Next-step suggestions        prompt override        PROMPT_COMMAND
+                                                        function prints the
+                                                        same colored block.
+    Telemetry                    Start-Job + TCP        fire-and-forget
+                                                        send, properly
+                                                        disowned (sec. 4).
+
+  Net result: bash users get accept-binding + Tab frecency + next-steps +
+  reliable telemetry. The only true gap vs. PowerShell is live inline
+  ghost text, which zsh closes.
+
+================================================================================
+4. BUG FOUND IN THE ORIGINAL BASH HOOK: SUSPENDED JOBS
+================================================================================
+
+  SYMPTOM (observed on the Linux client):
+
+    [1]+  Stopped   echo "$payload" | socat - UNIX-CONNECT:".../autosuggest.sock"
+
+  ROOT CAUSE
+  ----------
+  The original telemetry-only hook launched the socket send as a
+  background job (`... &`) but did NOT `disown` it, and in some states the
+  job was left attached to the shell's job control. When the daemon/socket
+  wasn't immediately ready, the pipeline was suspended (SIGTTOU/job-control
+  interaction) and surfaced as a visible "[1]+ Stopped" message on the next
+  prompt — noisy and confusing.
+
+  FIX
+  ---
+  The rewritten hook:
+    - `disown`s every background send so job control never reports it.
+    - Resolves the Python interpreter once per session (no repeated
+      `command -v` per command).
+    - Uses an explicit fallback chain for the send:
+         socat (Unix socket) -> python one-shot (Unix socket)
+         -> /dev/tcp (TCP) -> python one-shot (TCP)
+    - Recommends installing `socat` for the lowest-latency path, but works
+      without it.`
+
+================================================================================
+5. THE ZSH ESCAPE HATCH: REAL INLINE GHOST TEXT ON LINUX
+================================================================================
+
+  Because bash cannot do live ghost text but many Linux/macOS users have
+  zsh available, we added a zsh hook. zsh's line editor (zle) DOES expose
+  the right primitive:
+
+    - POSTDISPLAY: text shown AFTER the cursor that is part of the display
+      but NOT part of the command buffer — exactly a ghost overlay.
+    - zle widgets (self-insert / backward-delete) let us re-render the
+      ghost on every keystroke cleanly.
+    - Right-arrow / Ctrl+F widgets commit the ghost into BUFFER.
+
+  So on zsh we reach genuine parity with the PowerShell inline experience,
+  plus frecency completion (compadd) and next-steps (precmd hook).
+
+  Recommendation hierarchy on Linux:
+    zsh  -> full experience incl. live inline ghost text
+    bash -> accept-binding + Tab frecency + next-steps (no live ghost)
+
+================================================================================
+6. WHY USERS MUST SWITCH FROM CSH/TCSH TO BASH
+================================================================================
+
+  On the managed host the LOGIN shell is tcsh/csh. The tool's hook is NOT
+  implemented for csh, and cannot reasonably be, because csh/tcsh lack the
+  facilities every part of the integration depends on:
+
+    Needed primitive            bash/zsh        csh/tcsh
+    ----------------            --------        --------
+    Run code after each cmd     PROMPT_COMMAND  (no direct equivalent;
+                                / precmd        precmd alias exists in
+                                                tcsh but is limited)
+    Edit the input buffer       READLINE_LINE / zle   no exposed line-edit
+      from a key binding        buffer vars     buffer variables
+    Custom key widgets          bind -x /       bindkey can only map to
+                                zle -N          built-in editor commands,
+                                                not arbitrary shell code
+    Inline ghost overlay        zle POSTDISPLAY none
+
+  csh was also never designed for scripting of this kind; even basic hook
+  scaffolding (capturing the last command, JSON-escaping it, firing a
+  background send) is awkward or impossible in portable csh.
+
+  THEREFORE: the supported path on a csh host is to start `bash` and
+  activate the hook there. csh remains the login shell; bash is used as
+  the working shell where suggestions live. (A user could alternatively
+  start zsh for the richer experience.)
+
+================================================================================
+7. ENVIRONMENT ISSUES HIT DURING DEPLOYMENT (NOT CODE BUGS)
+================================================================================
+
+  These were host/environment problems, documented here so the next person
+  recognizes them quickly.
+
+  7.1 OLD SYSTEM PYTHON (3.6)
+  ---------------------------
+    pip install failed with:
+      Command "python setup.py egg_info" failed ...
+      File "/usr/lib64/python3.6/tokenize.py" ...
+    Two stacked causes:
+      (a) python3 was 3.6; the project requires 3.10+ and uses 3.10+
+          syntax, so it can't even import on 3.6.
+      (b) 3.6's old pip used the legacy setup.py build path, which this
+          pyproject.toml-only project does not provide.
+    Fix: `module load python/adi/3.12.2`, confirm `python3 --version`
+    shows 3.12.2, THEN pip install.
+
+  7.2 NON-PERSISTENT SETTINGS (ROOT-OWNED ~/.cshrc)
+  -------------------------------------------------
+    `echo ... >> ~/.cshrc` failed with "Permission denied"; the file is
+    -r--r--r-- owned by root (centrally managed). Modules and PATH edits
+    therefore do not survive logout. Workarounds: re-run the bootstrap per
+    session, or use a sanctioned writable include (e.g. ~/.cshrc.user) if
+    the managed ~/.cshrc sources one.
+
+  7.3 ~/.local/bin NOT ON PATH
+  ----------------------------
+    `pip install --user` puts the suggest-* scripts in ~/.local/bin, which
+    wasn't on PATH. In csh: `set path = ($HOME/.local/bin $path)` then
+    `rehash` so tcsh re-scans for the new commands.
+
+  7.4 csh MISPARSING PASTED TEXT
+  ------------------------------
+    Pasting multi-line instructions/prose into csh caused cascades of
+    "Badly placed ()'s", "Command not found", "Ambiguous output redirect".
+    csh tried to execute English and bash-only syntax (e.g. `2>/dev/null`,
+    which in csh must be `>& /dev/null`). Lesson: run commands one line at
+    a time in csh, and do the bash-y work inside bash.
+
+================================================================================
+8. DISTRIBUTION CHALLENGE: CHANGES MUST BE ON THE REMOTE
+================================================================================
+
+  `pip install git+<repo-url>` only fetches what is committed and pushed
+  to the remote. During this work the improved hook initially existed only
+  as local edits on the developer's machine, so the Linux box kept
+  installing the OLD commit. Confirming the installed commit hash (pip
+  prints "Resolved ... to commit <sha>") and, when needed, using
+  `--force-reinstall --no-cache-dir` was necessary to guarantee the new
+  version landed.
+
+  Quick check that the NEW hook is installed:
+    suggest-hook bash | grep -c _autosuggest_accept
+    # >= 2  => new parity hook;  0 => old/cached version
+
+================================================================================
+9. INCIDENT REPORT: MAKING IT "GLOBAL" WITHOUT BREAKING PERFORCE/ADV
+================================================================================
+
+  CONTEXT
+  -------
+  After the per-session bootstrap worked, the user's goal shifted from
+  "make it run" to "make it natural" — i.e. suggestions should be present
+  automatically in every terminal and every directory, not only after
+  manually invoking `suggest` / `suggest-start`. On this host the primary
+  daily workflow is: login via ETX -> run `adv` -> use Perforce (`p4`)
+  commands. The investigation below records why a naive "auto-launch bash"
+  nearly clashed with that workflow, and how it was resolved.
+
+  TIMELINE OF FINDINGS
+  --------------------
+  1. ROOT-OWNED LOGIN DOTFILE (already known)
+     ~/.cshrc is root-owned (-r--r--r--) and explicitly says
+     "Put any user customizations in .cshrc.user", which it sources at the
+     end. => ~/.cshrc.user is the sanctioned, writable hook point.
+
+  2. csh HEREDOC IS UNRELIABLE
+     Trying to write the bootstrap with `cat >> file << 'EOF'` left csh
+     hanging on "?" continuation prompts. => Switched to one-line `echo >>`
+     appends, which csh handles reliably.
+
+  3. RESTORED THE INTERACTIVE GUARD
+     The managed ~/.cshrc.user template begins with:
+         if ($?USER == 0 || $?prompt == 0) exit
+     which skips setup for non-interactive shells (scp/rsync/batch). This
+     line was accidentally dropped while rebuilding the file and had to be
+     restored to the TOP. Important: without it, login customizations run
+     in non-interactive contexts and can break file-transfer tools.
+
+  4. THE "GLOBAL" REQUEST -> AUTO-EXEC BASH IDEA
+     To make suggestions ambient, the plan was for csh to
+     `exec bash --rcfile ~/.suggest_bashrc -i` at interactive login.
+     The user correctly flagged the risk: this could clash with the ETX +
+     `adv` + Perforce workflow, which they believed required csh.
+
+  5. KEY DIAGNOSIS — PERFORCE IS NOT csh-DEPENDENT
+     Evidence gathered:
+       - `which adv`        => /cad/adi/bin/adv (a script, not an alias)
+       - `head -50 adv`     => shebang is #!/bin/sh  (POSIX sh, runs in bash)
+       - In base csh, `which p4` FAILED and there were no P4* env vars,
+         i.e. Perforce isn't set up by the login shell at all.
+       - Inside a hooked bash, after `source /cad/adi/.../adv/bin/adv`,
+         `p4 info` SUCCEEDED (authenticated, correct client/server).
+     Conclusion: `adv`/`p4` work fine in bash. The "must use csh" belief
+     was incorrect — the environment, not the shell, was the dependency.
+
+  6. `source adv` IS THE WRONG STARTUP MECHANISM
+     Sourcing adv runs a heavy interactive Perl CLI ("IN PERL WRAPPER",
+     "Validating all credentials", "Logged into Perforce") and then errors
+     with "No Project names found, Exiting..." when given no project. Far
+     too noisy/slow for shell startup. => We needed the lightweight env,
+     not the full login.
+
+  7. PERFORCE COMES FROM ENVIRONMENT MODULES, NOT FROM adv DIRECTLY
+     `env | grep -i p4` inside the working bash showed P4PORT / P4CONFIG /
+     P4IGNORE set, the p4 binary at
+         /cad/adi/apps/perforce/helix/linux/r19.1/p4
+     and ADIM_LOADED_OPTION listing `perforce/adi/r19.1` and
+     `p4v/adi/p4v-2024.1.2591061`. => The clean way to get p4 is a
+     `module load` of those modules; authentication persists via the
+     existing Perforce ticket (no re-login needed each shell).
+
+  8. BASH DID NOT HAVE THE `module` COMMAND
+     `module load ...` in bash failed with "bash: ./module: Permission
+     denied" — because the `module` function is defined per-shell and was
+     never initialized in bash; bash fell back to a literal `./module`
+     (note `.` at the end of PATH). The Modules install
+     ($MODULESHOME=/usr/cadtools/bin/modules.dir) had no init/ dir, but a
+     `module.sh` sh-initializer was present in $MODULESHOME.
+     Fix: `source $MODULESHOME/module.sh` first, THEN `module load ...`.
+     Verified: p4 info then worked from a clean bash.
+
+  9. MODULE LOAD WIPES ~/.local/bin FROM PATH
+     After fixing modules, `suggest-hook` / `suggest-daemon` became
+     "command not found". Reason: `module load` rebuilds PATH and dropped
+     ~/.local/bin (which had only been added on the csh side via
+     `set path`, and does not survive the module PATH rebuild in bash).
+     Fix: add `export PATH="$HOME/.local/bin:$PATH"` AFTER the module load
+     line in ~/.suggest_bashrc, so the suggest-* commands are found by the
+     `eval "$(suggest-hook bash)"` line that follows.
+
+  RESOLUTION (FINAL LAUNCHER)
+  ---------------------------
+  ~/.suggest_bashrc (order matters):
+
+      [ -f ~/.bashrc ] && . ~/.bashrc
+      source $MODULESHOME/module.sh
+      module load python/adi/3.12.2 perforce/adi/r19.1 p4v/adi/p4v-2024.1.2591061 >/dev/null 2>&1
+      export PATH="$HOME/.local/bin:$PATH"
+      eval "$(suggest-hook bash)"
+
+  Why this order:
+    1. user's normal bashrc first (baseline environment)
+    2. initialize the Modules system for bash (defines `module`)
+    3. load Python (for the engine) + Perforce (p4 on PATH, P4* env)
+    4. RE-ADD ~/.local/bin AFTER modules so suggest-* are found
+    5. activate the suggestion hook last
+
+  GLOBAL / AMBIENT ACTIVATION (csh -> hooked bash)
+  ------------------------------------------------
+  Appended to ~/.cshrc.user (below the existing bootstrap):
+
+      if ( $?prompt && ! $?AUTOSUGGEST_ACTIVE && ! -e ~/.no_autosuggest ) then
+          setenv AUTOSUGGEST_ACTIVE 1
+          exec bash --rcfile ~/.suggest_bashrc -i
+      endif
+
+  Safeguards:
+    - `$?prompt` + the file's top guard => only interactive logins switch;
+      scp/rsync/batch are untouched.
+    - AUTOSUGGEST_ACTIVE => loop guard (the spawned bash won't re-trigger).
+    - `exec` replaces csh (no nesting) so `exit` logs out normally.
+    - KILL SWITCH: `touch ~/.no_autosuggest` disables auto-bash on next
+      login; `rm ~/.no_autosuggest` re-enables. One-off pure csh in a live
+      session: `exec tcsh -f`.
+
+  OUTCOME
+  -------
+  A fresh ETX login now lands directly in a bash that has, silently and
+  automatically: Python 3.12, Perforce (`p4 info` works via persisted
+  ticket), ~/.local/bin on PATH, and the autosuggest hook active in every
+  directory. The Perforce/adv workflow is preserved (it never actually
+  needed csh); suggestions are finally "global and natural" as envisioned.
+
+  LESSONS FOR THE NEXT MANAGED-HOST DEPLOYMENT
+  --------------------------------------------
+  - Verify whether a "csh-only" tool truly needs csh or just its ENV.
+    Check the shebang and whether the binary works in bash with the right
+    modules loaded. Here the dependency was modules, not the shell.
+  - Prefer `module load` over sourcing heavy login wrappers at startup.
+  - After any `module load` in a startup file, RE-ADD user PATH entries
+    (e.g. ~/.local/bin); module systems rebuild PATH and can drop them.
+  - Initialize the Modules system for the target shell first
+    (`source $MODULESHOME/module.sh` for bash/sh).
+  - Always ship a kill switch (~/.no_autosuggest) when auto-exec'ing a
+    shell from a login file, so a bad config can't lock the user out.
+
+================================================================================
+10. SUMMARY OF OUTCOMES
+================================================================================
+
+  - Bash: hardened telemetry (no more suspended jobs) + accept-binding +
+    frecency Tab completion + next-step suggestions.
+  - Zsh: full parity including live inline ghost text via zle POSTDISPLAY.
+  - csh/tcsh: unchanged as login shell; users enter bash (or zsh) to use
+    the tool. No csh hook is planned (csh lacks the required primitives).
+  - Deployment: documented per-session bootstrap (module load + PATH +
+    bash + eval) for managed hosts where dotfiles are read-only.
+  - Global activation: csh auto-exec's a hooked bash that also loads the
+    Perforce/Python modules, so suggestions are ambient without breaking
+    the ETX + adv + p4 workflow (see section 9).
+
+  See also:
+    USER_GUIDE.txt  section 7a  — step-by-step per-session setup
+    DESIGN_DOC.txt  section 16  — managed-host deployment rationale
+
+================================================================================
+  END OF BASH PORTING NOTES
+================================================================================

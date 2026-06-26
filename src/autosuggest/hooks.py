@@ -856,9 +856,68 @@ function global:prompt {
 }
 '''
 
+TCSH_HOOK = r'''
+# autosuggest-cli: telemetry + next-step hook for tcsh/csh
+#
+# tcsh has no programmable line editor, so this hook does NOT provide inline
+# ghost text, an accept-suggestion key, or frecency Tab completion (use the
+# zsh hook or the `suggest` REPL for those). In your native tcsh login shell
+# it does give you:
+#   * Telemetry recording ......... yes (records every command)
+#   * Next-step suggestions ....... yes (printed after each command)
+#   * Inline ghost text ........... no  (tcsh limitation)
+#   * Frecency Tab completion ..... no  (tcsh limitation)
+#
+# Load it with tcsh-native BACKTICKS — csh/tcsh CANNOT parse $(...):
+#     eval `suggest-hook tcsh`
+# Persist it by adding that line to ~/.tcshrc (or ~/.cshrc.user on managed
+# hosts). Silence next-step output with:  setenv AUTOSUGGEST_NO_NEXTSTEPS 1
+
+# Put pip --user scripts on PATH so suggest-* resolve, then refresh the hash.
+if ( -d ~/.local/bin ) then
+    set path = ( $HOME/.local/bin $path )
+    rehash
+endif
+
+# Resolve a python interpreter once per session.
+if ( ! $?_AUTOSUGGEST_PY ) then
+    if ( -X python3 ) then
+        set _AUTOSUGGEST_PY = python3
+    else if ( -X python ) then
+        set _AUTOSUGGEST_PY = python
+    else
+        set _AUTOSUGGEST_PY = ""
+    endif
+endif
+
+# Start the telemetry daemon if it is not already running (best-effort).
+if ( "$_AUTOSUGGEST_PY" != "" ) then
+    if ( $?XDG_RUNTIME_DIR ) then
+        set _as_sock = "$XDG_RUNTIME_DIR/autosuggest.sock"
+    else
+        set _as_sock = "/tmp/autosuggest-`id -u`/autosuggest.sock"
+    endif
+    if ( ! -e "$_as_sock" ) then
+        if ( -X suggest-daemon ) then
+            ( suggest-daemon start >& /dev/null & )
+        else
+            ( $_AUTOSUGGEST_PY -m autosuggest.daemon start >& /dev/null & )
+        endif
+    endif
+    unset _as_sock
+endif
+
+# precmd runs before every prompt: record the command just finished and show
+# next-step suggestions. $status MUST be captured on the very first statement
+# so it reflects the command that just ran.
+alias precmd 'set _as_st = $status; set _as_cmd = "`history -h 1`"; if ( "$_AUTOSUGGEST_PY" != "" ) $_AUTOSUGGEST_PY -m autosuggest.tcsh_precmd "$_as_cmd:q" "$cwd" $_as_st'
+'''
+
 BASH_SOURCE_LINE = 'eval "$(suggest-hook bash)"'
 ZSH_SOURCE_LINE = 'eval "$(suggest-hook zsh)"'
 PS_SOURCE_LINE = 'Invoke-Expression ((& suggest-hook powershell) -join "`n")'
+# tcsh/csh cannot parse $(...); it uses backticks for command substitution.
+TCSH_SOURCE_LINE = 'if ( -X suggest-hook ) eval `suggest-hook tcsh`'
 
 
 def _print_hook(shell: str) -> None:
@@ -868,9 +927,11 @@ def _print_hook(shell: str) -> None:
         print(ZSH_HOOK.strip())
     elif shell == "powershell":
         print(POWERSHELL_HOOK.strip())
+    elif shell in ("tcsh", "csh"):
+        print(TCSH_HOOK.strip())
     else:
         print(f"[hook] unknown shell: {shell}")
-        print("Usage: suggest-hook [bash|zsh|powershell|install bash|install zsh|install powershell]")
+        print("Usage: suggest-hook [bash|zsh|tcsh|powershell|install <shell>]")
 
 
 def _install_hook(shell: str) -> None:
@@ -895,6 +956,28 @@ def _install_hook(shell: str) -> None:
             f.write(source_line)
         print(f"[hook] installed zsh hook in {zshrc}")
         print(f"  Run: source ~/.zshrc")
+
+    elif shell in ("tcsh", "csh"):
+        tcshrc = Path.home() / ".tcshrc"
+        # tcsh needs ~/.local/bin on PATH (and a rehash) *before* it can find
+        # suggest-hook, so the persisted block bootstraps PATH first, then evals
+        # the hook with tcsh-native backticks.
+        block = (
+            "\n# autosuggest-cli telemetry hook\n"
+            "if ( -d ~/.local/bin ) then\n"
+            "    set path = ( $HOME/.local/bin $path )\n"
+            "    rehash\n"
+            "endif\n"
+            f"{TCSH_SOURCE_LINE}\n"
+        )
+        if tcshrc.exists() and TCSH_SOURCE_LINE in tcshrc.read_text():
+            print(f"[hook] already installed in {tcshrc}")
+            return
+        with open(tcshrc, "a", encoding="utf-8") as f:
+            f.write(block)
+        print(f"[hook] installed tcsh hook in {tcshrc}")
+        print(f"  Run: source ~/.tcshrc")
+        print("  Note: tcsh gets telemetry + next-steps only (no inline ghost text).")
 
     elif shell == "powershell":
         # PowerShell profile path
@@ -931,21 +1014,25 @@ def run_hook() -> None:
         print("Usage: suggest-hook <shell>          Print hook code to stdout")
         print("       suggest-hook install <shell>  Install hook into shell profile")
         print()
-        print("Shells: bash, zsh, powershell")
+        print("Shells: bash, zsh, tcsh, powershell")
         print()
         print("Examples:")
-        print('  eval "$(suggest-hook bash)"         # Add to ~/.bashrc')
-        print('  eval "$(suggest-hook zsh)"          # Add to ~/.zshrc')
-        print("  suggest-hook install powershell     # Auto-install to $PROFILE")
+        print('  eval "$(suggest-hook bash)"         # bash: add to ~/.bashrc')
+        print('  eval "$(suggest-hook zsh)"          # zsh:  add to ~/.zshrc')
+        print('  eval `suggest-hook tcsh`            # tcsh: add to ~/.tcshrc (BACKTICKS!)')
+        print("  suggest-hook install powershell     # auto-install to $PROFILE")
+        print()
+        print("NOTE: csh/tcsh CANNOT parse $(...). In tcsh use backticks: `...`")
+        print("      (running the bash line in tcsh gives 'Illegal variable name').")
         return
 
     if args[0] == "install" and len(args) >= 2:
         _install_hook(args[1])
-    elif args[0] in ("bash", "zsh", "powershell"):
+    elif args[0] in ("bash", "zsh", "tcsh", "csh", "powershell"):
         _print_hook(args[0])
     else:
         print(f"[hook] unknown command: {' '.join(args)}")
-        print("Usage: suggest-hook [bash|powershell|install bash|install powershell]")
+        print("Usage: suggest-hook [bash|zsh|tcsh|powershell|install <shell>]")
 
 
 if __name__ == "__main__":

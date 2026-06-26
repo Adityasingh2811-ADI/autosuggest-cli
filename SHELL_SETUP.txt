@@ -1,0 +1,112 @@
+================  autosuggest-cli — USE IT IN YOUR SHELL  ================
+
+This guide is for people who want suggestions to appear at their NORMAL
+shell prompt (no separate window). If you just want the easy helper window
+instead, see START_HERE.txt and run `suggest`.
+
+
+--------------------------------------------------------------------------
+THE EASY WAY — one script does everything
+--------------------------------------------------------------------------
+
+From a copy of this project folder, run:
+
+    bash setup-suggest.sh
+
+That's the whole setup. The script automatically:
+    1. installs the tool if it isn't already,
+    2. detects your shell (bash / zsh / tcsh),
+    3. fixes your PATH,
+    4. adds the correct suggestion "hook" to your shell's startup file,
+    5. loads your existing command history once.
+
+Then turn it on in your current window:
+
+    bash :        source ~/.bashrc
+    zsh  :        source ~/.zshrc
+    tcsh / csh :  source ~/.tcshrc
+
+(Or just open a new terminal — it's automatic from now on.)
+
+Re-running the script is safe; it never doubles up your settings.
+
+Don't have the project folder? Either:
+    - download/clone it, then run the script above, OR
+    - use the manual one-liner for your shell (next section).
+
+
+--------------------------------------------------------------------------
+THE MANUAL WAY — one line for your shell
+--------------------------------------------------------------------------
+
+If you'd rather not use the script, add ONE line to your shell's startup
+file. Pick the line for YOUR shell — they are NOT interchangeable.
+
+  bash   -> add to ~/.bashrc :
+               eval "$(suggest-hook bash)"
+
+  zsh    -> add to ~/.zshrc :
+               eval "$(suggest-hook zsh)"
+
+  tcsh   -> add to ~/.tcshrc :   (NOTE THE BACKTICKS, not $(...) )
+               eval `suggest-hook tcsh`
+
+  PowerShell :
+               suggest-hook install powershell
+
+  >>> tcsh / csh users, IMPORTANT <<<
+  Do NOT use the bash line. csh/tcsh cannot understand $(...) and will
+  fail with "Illegal variable name". Use the backtick version above.
+
+Then reload (e.g. `source ~/.bashrc`) or open a new terminal.
+
+
+--------------------------------------------------------------------------
+HOW TO USE IT (once it's on)
+--------------------------------------------------------------------------
+
+Just work normally. After setup, your shell quietly suggests as you go:
+
+    * Tab            -> a menu of ranked suggestions (best ones first).
+    * Ctrl+F  or ->  -> accept the top suggestion instantly.
+    * After Enter    -> a short "Next steps:" line shows what usually
+                        comes next (e.g. git add -> git commit).
+
+What each shell gives you:
+    bash       : Tab menu + accept key + next-steps. (No live grey text —
+                 suggestions appear when you press a key. That's a bash
+                 limitation; use `suggest` if you want live grey text.)
+    zsh        : all of the above PLUS live grey ghost-text as you type.
+    PowerShell : live grey ghost-text + menu + next-steps.
+    tcsh       : records history + shows next-steps. (No grey text or Tab
+                 menu — tcsh can't do those; use `suggest` for grey text.)
+
+
+--------------------------------------------------------------------------
+CHECK IT'S WORKING / TURN IT OFF
+--------------------------------------------------------------------------
+
+    suggest-daemon status     -> is the background recorder running?
+    suggest-stats             -> usage dashboard
+
+    Pause:     touch ~/.no_autosuggest
+    Re-enable: rm ~/.no_autosuggest
+
+
+--------------------------------------------------------------------------
+TROUBLESHOOTING (the two common ones)
+--------------------------------------------------------------------------
+
+  "suggest: command not found" or "suggest-hook: command not found"
+      The tool's folder isn't on your PATH yet. Run ONE of these, then
+      retry (the setup script does this for you permanently):
+          bash / zsh :  export PATH="$HOME/.local/bin:$PATH"
+          tcsh / csh :  set path = ( $HOME/.local/bin $path ) ; rehash
+
+  "Illegal variable name" in tcsh
+      You ran the bash line in tcsh. Use the backtick version instead:
+          eval `suggest-hook tcsh`
+
+Managed EDA-CAD host (tcsh login that drops you into bash)? Use the
+purpose-built installer instead: `bash install-linux.sh`.
+=========================================================================
