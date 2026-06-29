@@ -85,9 +85,31 @@ case "$SHELL_KIND" in
 esac
 say "rc file       : $RCFILE"
 
-# ---- 2. find python --------------------------------------------------------
-PYBIN="$(command -v python3 || command -v python || true)"
-[ -n "$PYBIN" ] || die "no python found on PATH (need Python 3.10+)."
+# ---- 2. find a Python >= 3.10 ----------------------------------------------
+# EDA hosts often default to an ancient /usr/bin/python3 (e.g. 3.6) but ship a
+# newer one too. Find the best interpreter so the user never has to think about it.
+pyok() { [ -n "$1" ] && "$1" -c 'import sys;exit(0 if sys.version_info>=(3,10) else 1)' >/dev/null 2>&1; }
+
+PYBIN=""
+for cand in python3.13 python3.12 python3.11 python3.10 python3 python; do
+    p="$(command -v "$cand" 2>/dev/null || true)"
+    if pyok "$p"; then PYBIN="$p"; break; fi
+done
+
+# Last resort: many sites expose newer Python via environment modules.
+if [ -z "$PYBIN" ] && command -v module >/dev/null 2>&1; then
+    for m in python/3.12 python/3.11 python/3.10 python3; do
+        module load "$m" >/dev/null 2>&1 || continue
+        p="$(command -v python3 2>/dev/null || true)"
+        if pyok "$p"; then PYBIN="$p"; ok "loaded module: $m"; break; fi
+    done
+fi
+
+if [ -z "$PYBIN" ]; then
+    warn "default python is: $(command -v python3 2>/dev/null) ($(python3 -V 2>&1))"
+    die "need Python 3.10+. Try 'module avail python' and 'module load <ver>', then re-run."
+fi
+ok "using python   : $PYBIN ($("$PYBIN" -V 2>&1))"
 
 # ---- 3. make sure ~/.local/bin is on PATH for the rest of THIS script -------
 LOCALBIN="$HOME/.local/bin"
@@ -101,12 +123,12 @@ if ! command -v suggest-hook >/dev/null 2>&1; then
         else
             SRC="git+$GIT_URL"
         fi
-        # Old pip can't build pyproject.toml-only projects ("setup.py not found").
-        # Upgrade pip first (best effort), then force the modern PEP 517 path.
-        say "ensuring pip is recent enough ..."
-        "$PYBIN" -m pip install --user --upgrade --quiet pip >/dev/null 2>&1 || true
+        # Make sure pip/setuptools are healthy on the chosen interpreter, then
+        # install. With Python 3.10+ this Just Works; no PEP517 force-flag needed.
+        say "ensuring pip/setuptools are recent enough ..."
+        "$PYBIN" -m pip install --user --upgrade --quiet pip setuptools wheel >/dev/null 2>&1 || true
         say "installing the package (pip --user) from: $SRC"
-        "$PYBIN" -m pip install --user --upgrade --use-pep517 --no-cache-dir "$SRC" \
+        "$PYBIN" -m pip install --user --upgrade --no-cache-dir "$SRC" \
             || die "pip install failed"
         export PATH="$LOCALBIN:$PATH"
     else
