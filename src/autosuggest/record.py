@@ -15,6 +15,7 @@ import sys
 
 from autosuggest.daemon import SOCKET_PATH, TCP_PORT
 from autosuggest.paths import IS_WINDOWS
+from autosuggest.redact import redact
 
 
 def _send_socket(payload: bytes) -> bool:
@@ -57,7 +58,7 @@ def _send_db(command: str, cwd: str, status: int) -> None:
 
 def send_record(command: str, cwd: str, status: int = 0) -> None:
     """Record one command via the daemon, falling back to a direct DB insert."""
-    command = command.strip()
+    command = redact(command.strip())
     if not command:
         return
     payload = json.dumps(

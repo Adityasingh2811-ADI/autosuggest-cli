@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 from autosuggest.daemon import DB_PATH, init_db
+from autosuggest.redact import redact
 
 BASH_HISTORY_PATH = Path.home() / ".bash_history"
 ZSH_HISTORY_PATH = Path.home() / ".zsh_history"
@@ -75,6 +76,9 @@ def _parse_zsh_history(path: Path) -> list[tuple[str, float | None]]:
         i += 1
 
     return entries
+
+
+def _parse_powershell_history(path: Path) -> list[tuple[str, float | None]]:
     """Parse PowerShell PSReadLine history. Returns list of (command, None)."""
     entries: list[tuple[str, float | None]] = []
     if not path.exists():
@@ -133,13 +137,15 @@ def _bulk_insert(conn: sqlite3.Connection, entries: list[tuple[str, float]]) -> 
     inserted = 0
     for i in range(0, len(entries), BATCH_SIZE):
         batch = entries[i : i + BATCH_SIZE]
+        rows = [(redact(cmd), "~", ts) for cmd, ts in batch]
+        rows = [r for r in rows if r[0]]
         conn.executemany(
             "INSERT INTO command_history (command, cwd, exit_status, timestamp) "
             "VALUES (?, ?, 0, ?)",
-            [(cmd, "~", ts) for cmd, ts in batch],
+            rows,
         )
         conn.commit()
-        inserted += len(batch)
+        inserted += len(rows)
     return inserted
 
 

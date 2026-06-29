@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 from autosuggest.paths import db_path, pid_path, socket_path
+from autosuggest.redact import redact
 from autosuggest.paths import IS_WINDOWS
 from autosuggest.engine import _SCHEMA
 
@@ -61,9 +62,12 @@ async def handle_client(
 
 
 def _insert_row(db: sqlite3.Connection, payload: dict) -> None:
+    command = redact(payload["command"])
+    if not command:
+        return
     db.execute(
         "INSERT INTO command_history (command, cwd, exit_status) VALUES (?, ?, ?)",
-        (payload["command"], payload["cwd"], payload.get("exit_status", 0)),
+        (command, payload["cwd"], payload.get("exit_status", 0)),
     )
     db.commit()
 
