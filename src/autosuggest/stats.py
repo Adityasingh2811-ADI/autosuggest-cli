@@ -3,6 +3,8 @@ Usage statistics — queries the command history database and displays
 metrics about usage patterns, top commands, and workflow efficiency.
 """
 
+import argparse
+import json
 import sqlite3
 import sys
 import time
@@ -39,16 +41,56 @@ def _print_section(title: str) -> None:
     print(f"  {'─' * 50}")
 
 
-def run_stats() -> None:
+def _print_after(conn: sqlite3.Connection, cmd: str, n: int) -> None:
+    rows = conn.execute("""
+        SELECT next.command, COUNT(*) AS cnt
+        FROM command_history curr
+        JOIN command_history next
+          ON next.cwd = curr.cwd
+          AND next.id = (SELECT MIN(x.id) FROM command_history x
+                         WHERE x.cwd = curr.cwd AND x.id > curr.id)
+        WHERE curr.command = ? AND curr.exit_status = 0 AND next.exit_status = 0
+          AND next.command != curr.command
+        GROUP BY next.command ORDER BY cnt DESC LIMIT ?
+    """, (cmd, n)).fetchall()
+    conn.close()
+    if not rows:
+        print(f"\n  No follow-up commands recorded after: {cmd}\n")
+        return
+    _print_section(f"After '{cmd}' you usually run")
+    for i, (to_cmd, cnt) in enumerate(rows, 1):
+        print(f"  {i:>2}. {to_cmd}  ({cnt}x)")
+    print()
+
+
+def _emit_json(conn: sqlite3.Connection, n: int, where: str, params: tuple) -> None:
+    top = conn.execute(
+        f"SELECT command, COUNT(*) c FROM command_history {where} "
+        f"GROUP BY command ORDER BY c DESC LIMIT ?", (*params, n)).fetchall()
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM command_history {where}", params).fetchone()[0]
+    conn.close()
+    print(json.dumps({"total": total, "top": [{"command": c, "count": n} for c, n in top]}))
+
+
+def run_stats(n: int = 10, dir_filter: str | None = None) -> None:
     conn = _connect()
     now = time.time()
 
+    where = "WHERE 1=1"
+    params: tuple = ()
+    if dir_filter:
+        where += " AND cwd = ?"
+        params = (dir_filter,)
+
     # Overall counts
-    total = conn.execute("SELECT COUNT(*) FROM command_history").fetchone()[0]
-    unique = conn.execute("SELECT COUNT(DISTINCT command) FROM command_history").fetchone()[0]
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM command_history {where}", params).fetchone()[0]
+    unique = conn.execute(
+        f"SELECT COUNT(DISTINCT command) FROM command_history {where}", params).fetchone()[0]
     directories = conn.execute("SELECT COUNT(DISTINCT cwd) FROM command_history").fetchone()[0]
     success = conn.execute(
-        "SELECT COUNT(*) FROM command_history WHERE exit_status = 0"
+        f"SELECT COUNT(*) FROM command_history {where} AND exit_status = 0", params
     ).fetchone()[0]
 
     if total == 0:
@@ -62,14 +104,14 @@ def run_stats() -> None:
     tracking_duration = last_ts - first_ts if first_ts and last_ts else 0
 
     # Top commands
-    top_commands = conn.execute("""
+    top_commands = conn.execute(f"""
         SELECT command, COUNT(*) as cnt
         FROM command_history
-        WHERE exit_status = 0
+        {where} AND exit_status = 0
         GROUP BY command
         ORDER BY cnt DESC
-        LIMIT 10
-    """).fetchall()
+        LIMIT {int(n)}
+    """, params).fetchall()
 
     # Top directories
     top_dirs = conn.execute("""
@@ -156,8 +198,22 @@ def run_stats() -> None:
 
 
 def run() -> None:
-    run_stats()
+    ap = argparse.ArgumentParser(prog="suggest-stats", description="autosuggest usage stats")
+    ap.add_argument("-n", "--top", type=int, default=10, help="number of top commands to show")
+    ap.add_argument("--dir", metavar="PATH", help="only count commands run in this directory")
+    ap.add_argument("--after", metavar="CMD", help="show commands usually run after CMD")
+    ap.add_argument("--json", action="store_true", help="machine-readable top commands")
+    args = ap.parse_args()
+
+    if args.after:
+        _print_after(_connect(), args.after, args.top)
+        return
+    if args.json:
+        where, params = ("WHERE cwd = ?", (args.dir,)) if args.dir else ("", ())
+        _emit_json(_connect(), args.top, where, params)
+        return
+    run_stats(n=args.top, dir_filter=args.dir)
 
 
 if __name__ == "__main__":
-    run_stats()
+    run()
