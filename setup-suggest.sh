@@ -101,8 +101,12 @@ if ! command -v suggest-hook >/dev/null 2>&1; then
         else
             SRC="git+$GIT_URL"
         fi
+        # Old pip can't build pyproject.toml-only projects ("setup.py not found").
+        # Upgrade pip first (best effort), then force the modern PEP 517 path.
+        say "ensuring pip is recent enough ..."
+        "$PYBIN" -m pip install --user --upgrade --quiet pip >/dev/null 2>&1 || true
         say "installing the package (pip --user) from: $SRC"
-        "$PYBIN" -m pip install --user --upgrade --no-cache-dir "$SRC" \
+        "$PYBIN" -m pip install --user --upgrade --use-pep517 --no-cache-dir "$SRC" \
             || die "pip install failed"
         export PATH="$LOCALBIN:$PATH"
     else

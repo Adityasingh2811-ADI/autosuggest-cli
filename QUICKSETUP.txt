@@ -1,0 +1,99 @@
+==============================================================================
+  autosuggest-cli  —  QUICK SETUP  (read me first)
+==============================================================================
+
+  What this is:
+  A little helper that suggests the next command you probably want to type,
+  based on your own history. Works in bash, zsh, and tcsh/csh.
+
+  IMPORTANT: nothing runs by itself when you download the repo. You run ONE
+  command, ONE time. After that, every new terminal sets itself up for you.
+
+
+------------------------------------------------------------------------------
+  STEP 1 — get the code
+------------------------------------------------------------------------------
+
+      git clone https://github.com/Adityasingh2811-ADI/autosuggest-cli.git
+      cd autosuggest-cli
+
+
+------------------------------------------------------------------------------
+  STEP 2 — run the setup ONCE  (always with "bash", even on a tcsh prompt)
+------------------------------------------------------------------------------
+
+      bash setup-suggest.sh
+
+  That single command figures out your shell on its own and does everything:
+      - installs the tool
+      - fixes your PATH
+      - adds the correct hook to your shell's startup file
+        (bash -> ~/.bashrc, zsh -> ~/.zshrc, tcsh/csh -> ~/.tcshrc)
+      - loads suggestions from your existing command history
+
+  You do NOT need to know which shell you're on. It detects it.
+  Running it again later is safe — it never makes a mess or duplicates lines.
+
+
+------------------------------------------------------------------------------
+  STEP 3 — turn it on now
+------------------------------------------------------------------------------
+
+  Either open a brand-new terminal, OR reload your current one:
+
+      bash / zsh :   source ~/.bashrc        (or  source ~/.zshrc)
+      tcsh / csh :   source ~/.tcshrc
+
+  From now on, every new terminal is ready automatically. You're done.
+
+
+------------------------------------------------------------------------------
+  HOW TO USE IT
+------------------------------------------------------------------------------
+
+  - Just type commands like you normally do.
+  - After a command runs, you'll see a short "Next steps:" list of likely
+    follow-up commands.
+  - Prefer a pop-up helper window? Run:
+
+        suggest
+
+    (This works in ANY shell and needs no setup at all.)
+
+
+------------------------------------------------------------------------------
+  IF SOMETHING DOESN'T WORK
+------------------------------------------------------------------------------
+
+  "suggest: Command not found"
+      Your PATH hasn't picked up the new program yet. Fix it:
+
+        bash / zsh :   export PATH="$HOME/.local/bin:$PATH"
+        tcsh / csh :   set path = ( $HOME/.local/bin $path ) ; rehash
+
+      Then re-run STEP 2. (The setup adds this permanently, so this is
+      usually only needed the very first time.)
+
+  "Illegal variable name"  (tcsh/csh users)
+      You tried a bash-style command in tcsh. Use setup-suggest.sh instead —
+      it writes the correct tcsh version for you. Never paste a command that
+      contains  $(...)  into tcsh/csh.
+
+  Re-run the setup any time to repair things:
+
+        bash setup-suggest.sh
+
+
+------------------------------------------------------------------------------
+  TURN IT OFF
+------------------------------------------------------------------------------
+
+  Open your startup file and delete the block between these two lines:
+
+        # >>> autosuggest-cli >>>
+        # <<< autosuggest-cli <<<
+
+  (bash -> ~/.bashrc, zsh -> ~/.zshrc, tcsh/csh -> ~/.tcshrc)
+  Then open a new terminal.
+
+==============================================================================
