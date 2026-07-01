@@ -9,6 +9,10 @@
 # lands in a bash that already has Python, Perforce, ~/.local/bin on PATH,
 # and the autosuggest hook active.  No further manual changes are required.
 #
+# Users do NOT need git: when installed from a shared copy that a maintainer
+# has 'publish'ed, it installs from a local offline wheelhouse (no git, no
+# network).  Only the maintainer's one-time 'publish' step uses git.
+#
 #   USAGE (from csh/tcsh or bash):
 #       bash install-linux.sh            # per-user install (clean reinstall)
 #       bash install-linux.sh publish    # maintainer: deploy shared copy
@@ -55,15 +59,49 @@ ok()   { printf '  [ok] %s\n' "$*"; }
 warn() { printf '  [!!] %s\n' "$*" >&2; }
 die()  { printf '\n  ERROR: %s\n' "$*" >&2; exit 1; }
 
+# ---- shared: make a Python >= 3.10 available, set $PYBIN -------------------
+ensure_python() {
+    # bash does not get the `module` function for free; initialise it so we can
+    # `module load` python/perforce.  The sh-initialiser lives at $MODULESHOME.
+    if ! type module >/dev/null 2>&1; then
+        if [ -n "${MODULESHOME:-}" ] && [ -f "$MODULESHOME/module.sh" ]; then
+            # shellcheck disable=SC1090
+            source "$MODULESHOME/module.sh"
+        elif [ -f /usr/cadtools/bin/modules.dir/module.sh ]; then
+            export MODULESHOME=/usr/cadtools/bin/modules.dir
+            source "$MODULESHOME/module.sh"
+        elif [ -f /etc/profile.d/modules.sh ]; then
+            source /etc/profile.d/modules.sh
+        fi
+    fi
+    if type module >/dev/null 2>&1; then
+        module load $PY_MODULE >/dev/null 2>&1 && ok "loaded $PY_MODULE" \
+            || warn "could not load $PY_MODULE — using whatever python3 is on PATH"
+    else
+        warn "could not initialise Environment Modules — continuing with system python"
+    fi
+
+    PYBIN="$(command -v python3 || true)"
+    [ -n "$PYBIN" ] || die "no python3 found on PATH"
+    local pyver
+    pyver="$("$PYBIN" -c 'import sys;print("%d.%d"%sys.version_info[:2])' 2>/dev/null || echo 0.0)"
+    say "using python3 = $PYBIN ($pyver)"
+    case "$pyver" in
+        3.1[0-9]|3.[2-9]*|[4-9].*) : ;;   # 3.10+ ok
+        *) die "python $pyver is too old (need 3.10+). Set PY_MODULE to a newer module." ;;
+    esac
+}
+
 # ---- optional: publish a shared copy (maintainer) --------------------------
 # Deploy/refresh the tool in a public area (e.g. a nobackup path) so teammates
-# install per-user from it — no per-user GitHub access needed.
+# install per-user from it — WITHOUT git and WITHOUT network access. Publishing
+# builds an offline wheelhouse ($dest/dist) that users install straight from.
 #
 #   USAGE (maintainer, run once per update):
 #       AUTOSUGGEST_SHARE=/path/in/nobackup/autosuggest-cli \
 #           bash install-linux.sh publish
 #
-#   then teammates run (per-user install, their own history DB):
+#   then teammates run (per-user install, their own history DB, no git needed):
 #       bash $AUTOSUGGEST_SHARE/install-linux.sh
 publish_share() {
     local dest="${AUTOSUGGEST_SHARE:-}"
@@ -85,11 +123,20 @@ publish_share() {
         git clone --quiet "$GIT_URL" "$dest" || die "git clone failed"
     fi
 
+    # Build an OFFLINE wheelhouse (package + all dependencies) so teammates can
+    # install with no git and no PyPI access — just prebuilt wheels on disk.
+    ensure_python
+    say "building offline wheelhouse in $dest/dist ..."
+    rm -rf "$dest/dist" "$dest/build" "$dest"/src/*.egg-info 2>/dev/null || true
+    "$PYBIN" -m pip wheel --no-cache-dir -w "$dest/dist" "$dest" \
+        || die "failed to build wheelhouse"
+    rm -rf "$dest/build" "$dest"/src/*.egg-info 2>/dev/null || true
+
     # group-readable/executable so teammates can run the installer from here
     chmod -R g+rX "$dest" 2>/dev/null || warn "could not chmod g+rX on $dest"
-    ok "published to $dest"
+    ok "published to $dest (wheelhouse: $dest/dist)"
     echo
-    say "Tell users to run (per-user install into their own ~/.local):"
+    say "Tell users to run (per-user install into their own ~/.local, no git):"
     say "    bash $dest/install-linux.sh"
     echo
     exit 0
@@ -106,42 +153,18 @@ say  "python module  : $PY_MODULE"
 say  "perforce       : $P4_MODULES"
 echo
 
-# ---- 1. initialise the Environment Modules system for bash -----------------
-# bash does not get the `module` function for free; initialise it so we can
-# `module load` python/perforce.  The sh-initialiser lives at $MODULESHOME.
-if ! type module >/dev/null 2>&1; then
-    if [ -n "${MODULESHOME:-}" ] && [ -f "$MODULESHOME/module.sh" ]; then
-        # shellcheck disable=SC1090
-        source "$MODULESHOME/module.sh"
-    elif [ -f /usr/cadtools/bin/modules.dir/module.sh ]; then
-        export MODULESHOME=/usr/cadtools/bin/modules.dir
-        source "$MODULESHOME/module.sh"
-    elif [ -f /etc/profile.d/modules.sh ]; then
-        source /etc/profile.d/modules.sh
-    fi
-fi
-if type module >/dev/null 2>&1; then
-    ok "module command available"
-else
-    warn "could not initialise Environment Modules — continuing with system python"
-fi
-
-# ---- 2. load python (needed for the 3.10+ engine) --------------------------
-if type module >/dev/null 2>&1; then
-    module load $PY_MODULE >/dev/null 2>&1 && ok "loaded $PY_MODULE" \
-        || warn "could not load $PY_MODULE — using whatever python3 is on PATH"
-fi
-
-PYBIN="$(command -v python3 || true)"
-[ -n "$PYBIN" ] || die "no python3 found on PATH"
-PYVER="$("$PYBIN" -c 'import sys;print("%d.%d"%sys.version_info[:2])' 2>/dev/null || echo 0.0)"
-say "using python3 = $PYBIN ($PYVER)"
-case "$PYVER" in
-    3.1[0-9]|3.[2-9]*|[4-9].*) : ;;   # 3.10+ ok
-    *) die "python $PYVER is too old (need 3.10+). Set PY_MODULE to a newer module." ;;
-esac
+# ---- 1+2. make a Python >= 3.10 available ----------------------------------
+ensure_python
 
 # ---- 3. (re)install the package into ~/.local ------------------------------
+# Prefer an offline wheelhouse ($SCRIPT_DIR/dist) if the maintainer published
+# one: that installs with NO git and NO network. Otherwise fall back to the
+# local clone, then the git URL (see PKG_SOURCE above).
+WHEELHOUSE=""
+if ls "$SCRIPT_DIR"/dist/cli_autosuggest-*.whl >/dev/null 2>&1; then
+    WHEELHOUSE="$SCRIPT_DIR/dist"
+fi
+
 # Clean reinstall: remove any previous install and stray leftovers first, so a
 # re-run always lands the updated code. pip can otherwise skip a same-version
 # install, and an interrupted uninstall can leave "~<name>" temp dirs behind.
@@ -161,9 +184,16 @@ if [ "${NO_CLEAN:-0}" != "1" ]; then
     ok "old install removed"
 fi
 
-say "installing the package (pip --user) ..."
-"$PYBIN" -m pip install --user --upgrade --force-reinstall --no-cache-dir "$PKG_SOURCE" \
-    || die "pip install failed"
+if [ -n "$WHEELHOUSE" ]; then
+    say "installing from offline wheelhouse (no git, no network): $WHEELHOUSE"
+    "$PYBIN" -m pip install --user --upgrade --force-reinstall --no-cache-dir \
+        --no-index --find-links "$WHEELHOUSE" cli-autosuggest \
+        || die "pip install (wheelhouse) failed"
+else
+    say "installing the package (pip --user) from: $PKG_SOURCE"
+    "$PYBIN" -m pip install --user --upgrade --force-reinstall --no-cache-dir "$PKG_SOURCE" \
+        || die "pip install failed"
+fi
 ok "package installed into ~/.local"
 
 # make sure ~/.local/bin is on PATH for the rest of THIS script too
