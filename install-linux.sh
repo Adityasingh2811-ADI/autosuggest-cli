@@ -10,14 +10,18 @@
 # and the autosuggest hook active.  No further manual changes are required.
 #
 #   USAGE (from csh/tcsh or bash):
-#       bash install-linux.sh
+#       bash install-linux.sh            # per-user install (clean reinstall)
+#       bash install-linux.sh publish    # maintainer: deploy shared copy
+#                                        #   (needs AUTOSUGGEST_SHARE=/path)
 #
-#   then either log out / log back in, or run:  exec bash --rcfile ~/.suggest_bashrc -i
+#   then either log out / log back in, or run:  suggest-start
 #
 #   OPTIONS (override the defaults via environment variables):
 #       PY_MODULE        python module to load   (default: python/adi/3.12.2)
 #       P4_MODULES       perforce modules         (default: perforce/adi/r19.1 p4v/adi/p4v-2024.1.2591061)
 #       PKG_SOURCE       what pip installs        (default: this repo if run from a clone, else the git URL)
+#       AUTOSUGGEST_SHARE  public path for 'publish' (shared clone location)
+#       NO_CLEAN=1       skip the clean-uninstall step before installing
 #       NO_AUTOLAUNCH=1  set up bash but do NOT auto-exec bash from csh login
 #
 #   KILL SWITCH (after install):
@@ -50,6 +54,50 @@ say()  { printf '  %s\n' "$*"; }
 ok()   { printf '  [ok] %s\n' "$*"; }
 warn() { printf '  [!!] %s\n' "$*" >&2; }
 die()  { printf '\n  ERROR: %s\n' "$*" >&2; exit 1; }
+
+# ---- optional: publish a shared copy (maintainer) --------------------------
+# Deploy/refresh the tool in a public area (e.g. a nobackup path) so teammates
+# install per-user from it — no per-user GitHub access needed.
+#
+#   USAGE (maintainer, run once per update):
+#       AUTOSUGGEST_SHARE=/path/in/nobackup/autosuggest-cli \
+#           bash install-linux.sh publish
+#
+#   then teammates run (per-user install, their own history DB):
+#       bash $AUTOSUGGEST_SHARE/install-linux.sh
+publish_share() {
+    local dest="${AUTOSUGGEST_SHARE:-}"
+    [ -n "$dest" ] || die "set AUTOSUGGEST_SHARE=/path/in/nobackup before 'publish'"
+    command -v git >/dev/null 2>&1 || die "git not found on PATH"
+
+    echo
+    echo "=== autosuggest-cli : publish shared copy ================================="
+    if [ -d "$dest/.git" ]; then
+        say "updating shared copy at $dest ..."
+        git -C "$dest" fetch --quiet origin \
+            && git -C "$dest" reset --hard --quiet origin/master \
+            || die "git update failed in $dest"
+    elif [ -e "$dest" ] && [ -n "$(ls -A "$dest" 2>/dev/null)" ]; then
+        die "$dest exists and is not a git clone; remove it or choose another path"
+    else
+        say "cloning shared copy into $dest ..."
+        mkdir -p "$dest" || die "cannot create $dest"
+        git clone --quiet "$GIT_URL" "$dest" || die "git clone failed"
+    fi
+
+    # group-readable/executable so teammates can run the installer from here
+    chmod -R g+rX "$dest" 2>/dev/null || warn "could not chmod g+rX on $dest"
+    ok "published to $dest"
+    echo
+    say "Tell users to run (per-user install into their own ~/.local):"
+    say "    bash $dest/install-linux.sh"
+    echo
+    exit 0
+}
+
+case "${1:-}" in
+    publish|--publish) publish_share ;;
+esac
 
 echo
 echo "=== autosuggest-cli : one-shot Linux install ==============================="
@@ -93,9 +141,28 @@ case "$PYVER" in
     *) die "python $PYVER is too old (need 3.10+). Set PY_MODULE to a newer module." ;;
 esac
 
-# ---- 3. install the package into ~/.local ----------------------------------
+# ---- 3. (re)install the package into ~/.local ------------------------------
+# Clean reinstall: remove any previous install and stray leftovers first, so a
+# re-run always lands the updated code. pip can otherwise skip a same-version
+# install, and an interrupted uninstall can leave "~<name>" temp dirs behind.
+if [ "${NO_CLEAN:-0}" != "1" ]; then
+    say "removing any previous install ..."
+    "$PYBIN" -m pip uninstall -y cli-autosuggest >/dev/null 2>&1 || true
+    # stale console scripts from older versions
+    for s in autosuggest suggest suggest-start suggest-daemon suggest-hook \
+             suggest-import suggest-nextsteps suggest-seed suggest-stats; do
+        rm -f "$HOME/.local/bin/$s" 2>/dev/null || true
+    done
+    # pip's interrupted-uninstall leftovers (dirs like ~ip, ~.ml) in site-packages
+    for sp in "$HOME"/.local/lib/python*/site-packages; do
+        [ -d "$sp" ] || continue
+        find "$sp" -maxdepth 1 -name '~*' -exec rm -rf {} + 2>/dev/null || true
+    done
+    ok "old install removed"
+fi
+
 say "installing the package (pip --user) ..."
-"$PYBIN" -m pip install --user --upgrade --no-cache-dir "$PKG_SOURCE" \
+"$PYBIN" -m pip install --user --upgrade --force-reinstall --no-cache-dir "$PKG_SOURCE" \
     || die "pip install failed"
 ok "package installed into ~/.local"
 
@@ -182,7 +249,7 @@ ok "updated $CSHRC_USER"
 echo
 echo "=== install complete ======================================================="
 say "Start using it now without logging out:"
-say "    exec bash --rcfile ~/.suggest_bashrc -i"
+say "    suggest-start        # hooked bash with Python + Perforce + modules"
 echo
 say "Or just open a new terminal / log in again — it is automatic."
 say "Verify inside the new shell:"

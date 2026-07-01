@@ -22,6 +22,7 @@ dev = [
 [project.scripts]
 autosuggest = "autosuggest.launcher:main"
 suggest = "autosuggest.main:run"
+suggest-start = "autosuggest.start:main"
 suggest-daemon = "autosuggest.daemon:run_daemon"
 suggest-import = "autosuggest.importer:run_import"
 suggest-hook = "autosuggest.hooks:run_hook"
