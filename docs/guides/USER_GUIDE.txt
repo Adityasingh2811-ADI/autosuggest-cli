@@ -18,6 +18,7 @@ TABLE OF CONTENTS
   5.  Two Ways to Use It
   6.  The Interactive Shell (suggest)
   7.  Native Shell Integration (PowerShell / Bash)
+  7a. Per-Session Setup on Managed Hosts (csh login shell)
   8.  PowerShell Ghost-Text (PS7+ Inline Predictions)
   9.  Next-Step Suggestions
   10. Argument-Aware Completions
@@ -266,6 +267,22 @@ TABLE OF CONTENTS
     2. Add:  eval "$(suggest-hook bash)"
     3. Run:  source ~/.bashrc
 
+  SETUP: BASH ON MANAGED LINUX HOSTS (e.g. Exceed TurboX, EDA/CAD farms)
+  ---------------------------------------------------------------------
+  On centrally-managed Linux hosts (typical for ADI engineering servers
+  accessed via Exceed TurboX), three constraints change the setup:
+
+    1. The login shell is often tcsh/csh, NOT bash.
+    2. The system python3 may be too old (e.g. 3.6). A newer Python is
+       provided through environment modules (e.g. python/adi/3.12.2).
+    3. Dotfiles such as ~/.cshrc are owned by root and read-only, so
+       you cannot persist settings there.
+
+  Because of these constraints you must run a short PER-SESSION BOOTSTRAP
+  in EVERY new login before using the tool. See the dedicated section
+  "7a. PER-SESSION SETUP ON MANAGED HOSTS" below for the exact steps and
+  the reasoning behind each one.
+
   VERIFYING IT WORKS
   ------------------
   After setup, run a few commands in your shell, then:
@@ -283,6 +300,120 @@ TABLE OF CONTENTS
   Remove the autosuggest line from your profile (~/.bashrc or $PROFILE).
   The hook silently fails if the daemon isn't running — no harm in
   leaving it installed.
+
+================================================================================
+7a. PER-SESSION SETUP ON MANAGED HOSTS (csh login shell)
+================================================================================
+
+  WHO NEEDS THIS
+  --------------
+  Anyone using the tool on a centrally-managed Linux host where:
+    - the default/login shell is tcsh or csh, and/or
+    - Python comes from environment modules, and/or
+    - your home dotfiles (~/.cshrc, sometimes ~/.bashrc) are root-owned.
+
+  This is the common case on ADI engineering servers reached through
+  Exceed TurboX. If you own your machine and your login shell is already
+  bash with Python 3.10+ on PATH, you can ignore this section and use the
+  normal "SETUP: BASH" steps instead.
+
+  THE PROBLEM (WHY A BOOTSTRAP IS NEEDED)
+  ---------------------------------------
+  Three host constraints each break a normal install assumption:
+
+    1. OLD SYSTEM PYTHON
+       The default `python3` may be 3.6. autosuggest-cli requires Python
+       3.10+ (it uses 3.10+ syntax such as `int | None` type hints), and
+       3.6's bundled pip uses the legacy `setup.py egg_info` build path,
+       which fails on this project's modern (pyproject.toml-only) build.
+       => You must load a newer Python module first.
+
+    2. SETTINGS DO NOT PERSIST
+       Environment modules and `set path` only affect the current shell
+       session. Because ~/.cshrc is root-owned (-r--r--r--), you cannot
+       add them there to run automatically at login.
+       => You must re-apply them every new session.
+
+    3. THE HOOK IS A BASH/ZSH FEATURE, NOT CSH
+       The shell hook is implemented for bash, zsh, and PowerShell. There
+       is no csh/tcsh hook (csh lacks PROMPT_COMMAND, `bind -x`, and the
+       readline buffer variables the hook relies on).
+       => You must switch into bash to actually use the suggestions.
+
+  PER-SESSION BOOTSTRAP (RUN AT THE START OF EVERY SESSION)
+  --------------------------------------------------------
+  In your tcsh/csh login shell:
+
+    # 1. Load a modern Python (gives you python3 3.10+ and a modern pip)
+    module load python/adi/3.12.2
+
+    # 2. Put user-installed console scripts on PATH (suggest-*, pip, etc.)
+    #    NOTE: csh syntax, not bash. ~/.local/bin is where `pip --user`
+    #    installs the suggest-* commands.
+    set path = ($HOME/.local/bin $path)
+
+    # 3. Refresh tcsh's command hash table so it sees the new commands
+    rehash
+
+    # 4. Switch into bash (the hook only works in bash/zsh)
+    bash
+
+  Then, INSIDE bash:
+
+    # 5. Confirm Python carried over (env-module vars propagate to the
+    #    subshell). Must print 3.10+; if it shows 3.6, run the module
+    #    load again here.
+    python3 --version
+
+    # 6. Activate the hook for this session WITHOUT writing any file.
+    #    Use eval (not `suggest-hook install bash`) because ~/.bashrc may
+    #    also be root-owned on managed hosts.
+    eval "$(suggest-hook bash)"
+
+    # 7. Verify
+    suggest-daemon status
+
+  WHY `eval` INSTEAD OF `install`
+  -------------------------------
+  `suggest-hook install bash` appends the hook line to ~/.bashrc. On a
+  managed host that file may be read-only, so the install would fail.
+  `eval "$(suggest-hook bash)"` injects the same hook into the current
+  bash session directly — no file write required. The trade-off is that
+  it lasts only for that session (re-run it each time, as in step 6).
+
+  MAKING IT STICK (IF YOU HAVE A WRITABLE INCLUDE FILE)
+  -----------------------------------------------------
+  Many managed ~/.cshrc files end with a line that sources a user-owned
+  include, for example:
+
+    if (-f ~/.cshrc.user) source ~/.cshrc.user
+
+  Check with:  cat ~/.cshrc
+
+  If such a line exists, create the writable include (e.g. ~/.cshrc.user)
+  and put the persistent csh-side steps there:
+
+    module load python/adi/3.12.2
+    set path = ($HOME/.local/bin $path)
+
+  Similarly, if ~/.bashrc is writable (run `ls -l ~/.bashrc`), add the
+  bash-side activation so it auto-runs when you enter bash:
+
+    module load python/adi/3.12.2   2>/dev/null
+    eval "$(suggest-hook bash)"
+
+  If neither include is available, ask IT to make python/adi/3.12.2 a
+  default module for your account; the per-session bootstrap above is the
+  fallback until then.
+
+  COMMON CSH PITFALLS
+  -------------------
+  - Do NOT paste multi-line prose or comments into csh; it tries to run
+    every line and errors with "Badly placed ()'s" or "Command not found".
+  - csh does not understand bash redirection like `2>/dev/null`. Use
+    `>& /dev/null` in csh, or simply omit it. (Inside bash it works fine.)
+  - After installing new commands, run `rehash` so tcsh finds them;
+    `which suggest-daemon` should resolve to ~/.local/bin/suggest-daemon.
 
 ================================================================================
 8. POWERSHELL GHOST-TEXT (PS7+ INLINE PREDICTIONS)
@@ -667,6 +798,34 @@ TABLE OF CONTENTS
        from autosuggest.arg_completers import get_arg_completions
        import os; print(get_arg_completions('git checkout ', os.getcwd()))
        "
+
+  PROBLEM: "pip install fails with setup.py egg_info / FileNotFoundError"
+  ----------------------------------------------------------------------
+  Symptom (managed Linux host):
+       Command "python setup.py egg_info" failed ...
+       File "/usr/lib64/python3.6/tokenize.py" ...
+  Cause: your active python3 is too old (3.6). This project needs 3.10+
+  and a modern pip. Fix:
+       module load python/adi/3.12.2     (or your host's 3.10+ module)
+       python3 --version                 (must show 3.10+)
+       python3 -m pip install --user git+<repo-url>
+  See section "7a. PER-SESSION SETUP ON MANAGED HOSTS" for the full flow.
+
+  PROBLEM: "suggest-* commands not found after install (managed host)"
+  --------------------------------------------------------------------
+  1. ~/.local/bin is not on PATH. In csh:  set path = ($HOME/.local/bin $path)
+  2. Refresh the shell's command table:    rehash
+  3. Confirm:                              which suggest-daemon
+  Note: these do not persist if ~/.cshrc is root-owned — re-run them each
+  session, or add them to a writable include (see section 7a).
+
+  PROBLEM: "Hook does nothing in csh / job gets Stopped"
+  ------------------------------------------------------
+  The hook only works in bash or zsh — there is no csh/tcsh hook. From
+  csh, run `bash` first, then `eval "$(suggest-hook bash)"`. If you
+  previously saw a suspended background job (e.g. [1]+ Stopped ... socat),
+  upgrade to the current version, whose telemetry send is properly
+  disowned and falls back through socat -> python -> /dev/tcp.
 
 ================================================================================
 17. UNINSTALLING

@@ -77,7 +77,7 @@ rm    ~/.no_autosuggest   # re-enable
 exec tcsh -f              # drop to plain csh for the current session
 ```
 
-See [BASH_PORTING_NOTES.txt](BASH_PORTING_NOTES.txt) for the full rationale.
+See [BASH_PORTING_NOTES.txt](docs/design/BASH_PORTING_NOTES.txt) for the full rationale.
 
 ### Publishing a shared copy (maintainers)
 

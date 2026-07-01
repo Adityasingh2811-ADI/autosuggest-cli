@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "cli-autosuggest"
 version = "0.1.0"
 description = "A context-aware CLI autosuggestion engine."
-readme = "project_canvas.md"
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "prompt_toolkit>=3.0.0",
