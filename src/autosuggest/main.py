@@ -28,6 +28,7 @@ from autosuggest.daemon import is_daemon_running
 from autosuggest.engine import PredictionEngine
 from autosuggest.next_steps import NextStepResolver
 from autosuggest.paths import socket_path
+from autosuggest.shell_session import CommandRunner
 
 SOCKET_PATH = socket_path()
 
@@ -138,18 +139,6 @@ def _send_telemetry(command: str, cwd: str, exit_status: int) -> None:
         pass
 
 
-def _execute(command: str) -> int:
-    try:
-        result = subprocess.run(
-            command,
-            shell=True,
-            cwd=os.getcwd(),
-        )
-        return result.returncode
-    except Exception:
-        return 1
-
-
 def _prompt_text() -> HTML:
     cwd = os.getcwd()
     home = str(Path.home())
@@ -192,6 +181,7 @@ def main() -> None:
     _ensure_daemon()
     engine = PredictionEngine()
     resolver = NextStepResolver(engine)
+    runner = CommandRunner(start_cwd=os.getcwd())
     session: PromptSession = PromptSession(
         completer=FrecencyCompleter(engine),
         auto_suggest=FrecencyAutoSuggest(engine),
@@ -202,6 +192,8 @@ def main() -> None:
 
     print("autosuggest-cli | Ctrl+D to exit | Tab/Shift+Tab: cycle | ->: accept ghost")
     print("  Type a number [1-3] after suggestions to accept a next step.\n")
+    if runner.persistent:
+        print("  [persistent shell: module/env changes carry across commands]\n")
 
     last_suggestions: list = []
 
@@ -223,7 +215,10 @@ def main() -> None:
 
         cwd = os.getcwd()
 
-        if text.startswith("cd "):
+        # Without a persistent shell, `cd` must be handled by the REPL itself
+        # (a per-command subprocess cannot change our cwd). With a persistent
+        # shell, `cd` flows through it and its new cwd is read back below.
+        if not runner.handles_cd and text.startswith("cd "):
             target = os.path.expanduser(text[3:].strip())
             try:
                 os.chdir(target)
@@ -234,7 +229,12 @@ def main() -> None:
             _show_next_steps(last_suggestions)
             continue
 
-        exit_status = _execute(text)
+        exit_status = runner.run(text)
+        if runner.persistent and runner.cwd != cwd:
+            try:
+                os.chdir(runner.cwd)
+            except OSError:
+                pass
         _send_telemetry(text, cwd, exit_status)
 
         last_suggestions = resolver.suggest(text, cwd)
