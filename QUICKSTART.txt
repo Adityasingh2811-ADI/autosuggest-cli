@@ -21,6 +21,16 @@ THE WHOLE PIPELINE — copy these 3 lines, top to bottom
     (If your computer says "suggest: command not found" afterwards, see the
      "If a command isn't found" note at the very bottom.)
 
+    ON A MANAGED ADI HOST (tcsh login, old system Python)? Don't use the pip
+    line above — the default Python is too old. Instead run the installer from
+    the shared copy your team lead gave you (no git, no network needed):
+
+        bash /proj_nobackup/ee_sandbox/tools/autosuggest-cli/install-linux.sh
+        rehash
+
+    It loads a modern Python for you, installs into your own ~/.local, and
+    wires up your shell. Then use "suggest-start" or "suggest" (Step 3).
+
   Step 2 — Teach it your past commands (one time, optional but nice)
   -----------------------------------------------------------------
     suggest-import

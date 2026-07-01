@@ -21,6 +21,23 @@ pip install git+https://github.com/Adityasingh2811-ADI/autosuggest-cli.git
 
 Requires Python 3.10+.
 
+### ADI team install (managed hosts) — no git, no network
+
+If your team lead has published a shared copy, you don't need git, GitHub
+access, or a modern default Python. Just run the installer from the shared
+path they gave you — it loads Python for you and installs from a local,
+offline wheelhouse into your own `~/.local`:
+
+```bash
+bash /proj_nobackup/ee_sandbox/tools/autosuggest-cli/install-linux.sh
+rehash            # tcsh only, so it finds the new commands
+suggest-start     # hooked bash with Python + Perforce + modules
+```
+
+Re-running it is safe (it clean-reinstalls). Maintainers: to publish or
+refresh that shared copy, see
+[Publishing a shared copy](#publishing-a-shared-copy-maintainers) below.
+
 ### Managed Linux hosts (Exceed TurboX / EDA-CAD farms) — one-shot install
 
 On managed ADI hosts the login shell is csh/tcsh, the system Python is too
@@ -61,6 +78,31 @@ exec tcsh -f              # drop to plain csh for the current session
 ```
 
 See [BASH_PORTING_NOTES.txt](BASH_PORTING_NOTES.txt) for the full rationale.
+
+### Publishing a shared copy (maintainers)
+
+To let teammates install without git or network access, publish a shared,
+read-only copy once (and again whenever you want to ship an update):
+
+```bash
+module load python/adi/3.12.2
+AUTOSUGGEST_SHARE=/proj_nobackup/ee_sandbox/tools/autosuggest-cli \
+  bash install-linux.sh publish
+```
+
+This clones/updates the repo at that path, builds an **offline wheelhouse**
+(`dist/` — the package plus all dependencies), and makes it world-readable
+(`a+rX`). Then hand teammates the one-line install command:
+
+```bash
+bash /proj_nobackup/ee_sandbox/tools/autosuggest-cli/install-linux.sh
+```
+
+Users only need read access to that path — no group membership required, as
+long as the parent directories are traversable. Verify reachability with
+`namei -l <path>/install-linux.sh`. Note: the shared copy lives on a
+*nobackup* mount, so re-run `publish` if it's ever purged. Users' own installs
+in `~/.local` are unaffected by purges.
 
 ## Quick Start
 
