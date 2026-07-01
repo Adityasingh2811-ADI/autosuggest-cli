@@ -132,8 +132,9 @@ publish_share() {
         || die "failed to build wheelhouse"
     rm -rf "$dest/build" "$dest"/src/*.egg-info 2>/dev/null || true
 
-    # group-readable/executable so teammates can run the installer from here
-    chmod -R g+rX "$dest" 2>/dev/null || warn "could not chmod g+rX on $dest"
+    # readable + traversable by anyone the maintainer hands the path to
+    # (they only need to read from it; parent dirs already allow traverse).
+    chmod -R a+rX "$dest" 2>/dev/null || warn "could not chmod a+rX on $dest"
     ok "published to $dest (wheelhouse: $dest/dist)"
     echo
     say "Tell users to run (per-user install into their own ~/.local, no git):"
