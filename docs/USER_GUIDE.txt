@@ -2,8 +2,8 @@
                     AUTOSUGGEST-CLI — USER GUIDE
 ================================================================================
 
-  Version:  0.4.0
-  Date:     2026-06-15
+  Version:  0.5.0
+  Date:     2026-07-01
   Platform: Windows 10/11, Linux, macOS
   Author:   ASingh56 / CLI Tooling Team, Analog Devices
 
@@ -11,6 +11,7 @@
 TABLE OF CONTENTS
 ================================================================================
 
+  0.  Fastest Setup (Pick Your Path)
   1.  What Is This?
   2.  Prerequisites
   3.  Installation
@@ -29,6 +30,47 @@ TABLE OF CONTENTS
   15. Command Reference
   16. Troubleshooting
   17. Uninstalling
+
+================================================================================
+0. FASTEST SETUP (PICK YOUR PATH)
+================================================================================
+
+  Not sure where to start? Pick the one block that matches your situation.
+  This is the 30-second version; full details are in sections 3-7.
+
+  A) MANAGED ADI HOST (Exceed TurboX / EDA-CAD farm, tcsh login) — RECOMMENDED
+  ---------------------------------------------------------------------------
+  Your team lead publishes a shared copy; you install from it. No git, no
+  network, no worrying about which Python is the default:
+
+      bash /proj_nobackup/ee_sandbox/tools/autosuggest-cli/install-linux.sh
+      rehash
+      suggest-start        # a hooked bash with Python + Perforce + modules
+
+  (Ask your team lead for the exact path if it differs. Re-running the
+  installer is safe — it clean-reinstalls.)
+
+  B) JUST WANT THE HELPER WINDOW (any shell, any OS)
+  --------------------------------------------------
+      suggest
+
+      A helper prompt opens. Use it like a normal terminal:
+        * Grey text = a suggestion.  Press Right Arrow (->) to accept it.
+        * Press Tab for a menu of ranked suggestions.
+        * After a command, type a number (1-3) to run a "Next step".
+        * Type exit (or press Ctrl+D) to leave.
+      It needs no setup and gets smarter the more you use it.
+
+  C) YOUR OWN MACHINE (bash/zsh, Python 3.10+ already on PATH)
+  -----------------------------------------------------------
+      pip install --user git+https://github.com/Adityasingh2811-ADI/autosuggest-cli.git
+      suggest-import                     # load your existing history (once)
+      eval "$(suggest-hook bash)"        # zsh: eval "$(suggest-hook zsh)"
+
+  Then just work normally — section 5 explains what each shell gives you.
+
+  >>> tcsh/csh users: never paste a line containing $(...) — it fails with
+      "Illegal variable name". Use path A above, or `suggest` (path B).
 
 ================================================================================
 1. WHAT IS THIS?
@@ -69,6 +111,19 @@ TABLE OF CONTENTS
 3. INSTALLATION
 ================================================================================
 
+  MANAGED ADI HOST (Exceed TurboX / EDA-CAD farm) — RECOMMENDED
+  -------------------------------------------------------------
+  Install from the shared copy your team lead published. This needs no git,
+  no network, and loads a modern Python for you (the system python3 is often
+  too old). It installs into your own ~/.local:
+
+    bash /proj_nobackup/ee_sandbox/tools/autosuggest-cli/install-linux.sh
+    rehash            # tcsh only, so it finds the new commands
+
+  Re-running is safe (clean reinstall). Then use `suggest-start` or `suggest`.
+  Maintainers publish/refresh that shared copy with `install-linux.sh publish`
+  (see the project README, "Publishing a shared copy").
+
   FROM SOURCE (DEVELOPMENT)
   -------------------------
     git clone <repo-url> autosuggest-cli
@@ -94,6 +149,7 @@ TABLE OF CONTENTS
   INSTALLED COMMANDS
   ------------------
     suggest              Interactive shell with ghost-text
+    suggest-start        Enter a hooked bash with the ADI module environment
     suggest-daemon       Background telemetry daemon
     suggest-import       Import existing shell history
     suggest-hook         Shell integration hooks
