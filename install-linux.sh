@@ -61,6 +61,10 @@ die()  { printf '\n  ERROR: %s\n' "$*" >&2; exit 1; }
 
 # ---- shared: make a Python >= 3.10 available, set $PYBIN -------------------
 ensure_python() {
+    # The ADI Environment Modules shell code references unset variables (e.g.
+    # ECHON in meta_echo), which aborts under `set -u`. Disable nounset around
+    # all module operations, then restore it.
+    set +u
     # bash does not get the `module` function for free; initialise it so we can
     # `module load` python/perforce.  The sh-initialiser lives at $MODULESHOME.
     if ! type module >/dev/null 2>&1; then
@@ -80,6 +84,7 @@ ensure_python() {
     else
         warn "could not initialise Environment Modules — continuing with system python"
     fi
+    set -u
 
     PYBIN="$(command -v python3 || true)"
     [ -n "$PYBIN" ] || die "no python3 found on PATH"
