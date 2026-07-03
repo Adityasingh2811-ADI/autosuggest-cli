@@ -2,33 +2,40 @@
   autosuggest-cli  —  QUICK SETUP  (read me first)
 ==============================================================================
 
-  What this is:
   A little helper that suggests the next command you probably want to type,
   based on your own history. Built for managed ADI hosts (tcsh login, via
-  Exceed TurboX / EDA-CAD farms); also works on your own bash/zsh machine.
+  Exceed TurboX / EDA-CAD farms).
 
-  IMPORTANT: nothing runs by itself. You run ONE command, ONE time. After
-  that, every new login sets itself up for you.
+
+  ##########################################################################
+  #                                                                        #
+  #   THE ENTIRE SETUP  —  copy/paste these TWO lines:                     #
+  #                                                                        #
+  #       bash /home/asingh56/autosuggest-cli/install-linux.sh             #
+  #       rehash                                                           #
+  #                                                                        #
+  #   Then type  suggest-start  (or just open a new terminal).             #
+  #                                                                        #
+  ##########################################################################
+
+
+  That's it. No git, no GitHub access, no Python setup, no history import —
+  the installer does all of it. One command, one time; every new login is
+  ready automatically afterwards.
 
 
 ------------------------------------------------------------------------------
-  MANAGED ADI HOST (Exceed TurboX / EDA-CAD)  —  the two-command setup
+  WHAT THOSE TWO COMMANDS DO
 ------------------------------------------------------------------------------
 
-  You do NOT need git, GitHub access, or a newer Python. Your team lead
-  publishes a shared copy; you install from it:
+      - load a modern Python for you (the system one is too old)
+      - install the tool into your own ~/.local  (offline, no network)
+      - fix your PATH and write your shell startup files
+      - seed suggestions from your existing history (no separate step)
+      - set you up to drop into a hooked bash automatically at login
 
-      bash /home/asingh56/autosuggest-cli/install-linux.sh
-      rehash
-
-  That single installer does everything:
-      - loads a modern Python for you (the system one is too old)
-      - installs the tool into your own ~/.local  (offline, no network)
-      - fixes your PATH and writes your shell startup files
-      - seeds suggestions from your existing history (no separate step)
-      - sets you up to drop into a hooked bash automatically at login
-
-  Re-running it later is safe — it cleanly reinstalls, never duplicates.
+  Re-running them later is safe — it cleanly reinstalls, never duplicates.
+  (`rehash` is just so tcsh notices the new commands right away.)
 
 
 ------------------------------------------------------------------------------
