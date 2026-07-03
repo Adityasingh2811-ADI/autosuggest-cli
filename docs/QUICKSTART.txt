@@ -18,11 +18,8 @@
   You do NOT need git, GitHub access, or a newer Python. Your team lead
   publishes a shared copy; you install from it:
 
-      bash <shared-path>/autosuggest-cli/install-linux.sh
+      bash /home/asingh56/autosuggest-cli/install-linux.sh
       rehash
-
-  Replace <shared-path> with the path your team lead gave you
-  (for example:  /home/<lead>/autosuggest-cli ).
 
   That single installer does everything:
       - loads a modern Python for you (the system one is too old)
@@ -93,7 +90,7 @@
 
   Re-run the installer any time to repair things:
 
-        bash <shared-path>/autosuggest-cli/install-linux.sh
+        bash /home/asingh56/autosuggest-cli/install-linux.sh
 
 
 ------------------------------------------------------------------------------
