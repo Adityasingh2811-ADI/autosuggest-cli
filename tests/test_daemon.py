@@ -204,6 +204,27 @@ def test_dedupe_preserves_within_import_frequency_and_live_rows():
     assert db.execute("SELECT COUNT(*) FROM command_history").fetchone()[0] == 3
 
 
+def test_insert_row_does_not_depend_on_timestamp_default():
+    # Regression: on older SQLite (RHEL7/8) unixepoch() is missing, so relying
+    # on the column's timestamp DEFAULT makes every live insert fail. We must
+    # always pass an explicit timestamp. Simulate that by giving the column a
+    # default that would error if evaluated.
+    conn = sqlite3.connect(":memory:")
+    conn.executescript(
+        "CREATE TABLE command_history ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " command TEXT NOT NULL, cwd TEXT NOT NULL,"
+        " exit_status INTEGER NOT NULL DEFAULT 0,"
+        " timestamp REAL NOT NULL DEFAULT (this_function_does_not_exist()));"
+    )
+    # Must not raise, and must populate a real timestamp.
+    daemon._insert_row(conn, {"command": "ls", "cwd": "/p", "exit_status": 0})
+    row = conn.execute("SELECT command, timestamp FROM command_history").fetchone()
+    assert row[0] == "ls"
+    assert row[1] and row[1] > 0
+    conn.close()
+
+
 def test_dedupe_is_idempotent_on_clean_db():
     db = _mem_db()
     db.execute(

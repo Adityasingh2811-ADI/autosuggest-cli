@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS command_history (
     command TEXT NOT NULL,
     cwd TEXT NOT NULL,
     exit_status INTEGER NOT NULL DEFAULT 0,
-    timestamp REAL NOT NULL DEFAULT (unixepoch('now', 'subsec'))
+    timestamp REAL NOT NULL DEFAULT ((julianday('now') - 2440587.5) * 86400.0)
 );
 CREATE INDEX IF NOT EXISTS idx_frecency
     ON command_history(cwd, timestamp DESC, command);

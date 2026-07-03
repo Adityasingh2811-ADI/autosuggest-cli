@@ -54,13 +54,16 @@ def _send_socket(payload: bytes) -> bool:
 
 def _send_db(command: str, cwd: str, status: int) -> None:
     """Fallback path: write straight to the database when no daemon answers."""
+    import time
+
     from autosuggest.daemon import init_db
 
     conn = init_db()
     try:
         conn.execute(
-            "INSERT INTO command_history (command, cwd, exit_status) VALUES (?, ?, ?)",
-            (command, cwd, status),
+            "INSERT INTO command_history (command, cwd, exit_status, timestamp) "
+            "VALUES (?, ?, ?, ?)",
+            (command, cwd, status, time.time()),
         )
         conn.commit()
     finally:

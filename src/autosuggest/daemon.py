@@ -163,8 +163,9 @@ def _insert_row(db: sqlite3.Connection, payload: dict) -> None:
     if not command:
         return
     db.execute(
-        "INSERT INTO command_history (command, cwd, exit_status) VALUES (?, ?, ?)",
-        (command, payload["cwd"], payload.get("exit_status", 0)),
+        "INSERT INTO command_history (command, cwd, exit_status, timestamp) "
+        "VALUES (?, ?, ?, ?)",
+        (command, payload["cwd"], payload.get("exit_status", 0), time.time()),
     )
     db.commit()
 
