@@ -263,10 +263,12 @@ if [ "${NO_AUTOLAUNCH:-0}" = "1" ]; then
     alias suggest-start 'bash --rcfile ~/.suggest_bashrc -i'"
 else
     AUTOLAUNCH_BODY="    alias suggest-start 'bash --rcfile ~/.suggest_bashrc -i'
-    # auto-enter the hooked bash for interactive logins (kill switch: ~/.no_autosuggest)
+    # auto-enter the hooked bash for interactive logins (kill switch: ~/.no_autosuggest).
+    # NOTE: no 'exec' — so typing 'exit' in bash returns to this tcsh login
+    # shell instead of closing the terminal.
     if ( \$?prompt && ! \$?AUTOSUGGEST_ACTIVE && ! -e ~/.no_autosuggest ) then
         setenv AUTOSUGGEST_ACTIVE 1
-        exec bash --rcfile ~/.suggest_bashrc -i
+        bash --rcfile ~/.suggest_bashrc -i
     endif"
 fi
 

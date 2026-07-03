@@ -358,8 +358,11 @@
 
       if ( $?prompt && ! $?AUTOSUGGEST_ACTIVE && ! -e ~/.no_autosuggest ) then
           setenv AUTOSUGGEST_ACTIVE 1
-          exec bash --rcfile ~/.suggest_bashrc -i
+          bash --rcfile ~/.suggest_bashrc -i
       endif
+
+  (No `exec`: bash runs as a child of the tcsh login shell, so typing `exit`
+  in bash returns to tcsh instead of closing the terminal.)
 
   Safeguards:
     - `$?prompt` + the file's top guard => only interactive logins switch;
