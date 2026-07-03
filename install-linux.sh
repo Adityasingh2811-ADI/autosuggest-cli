@@ -79,6 +79,20 @@ _unreachable_by_others() {
 }
 
 # ---- shared: make a Python >= 3.10 available, set $PYBIN -------------------
+# Newest available module in a family, e.g. _latest_module python/adi -> python/adi/3.13.1
+# Best-effort: returns empty if Environment Modules can't be queried.
+_latest_module() {
+    local family="$1" latest=""
+    if type module >/dev/null 2>&1; then
+        latest="$(module -t avail "$family/" 2>&1 \
+            | grep -E "^${family}/" \
+            | grep -viE 'default|module' \
+            | sed 's/(.*)//' \
+            | sort -V | tail -n1)"
+    fi
+    printf '%s' "$latest"
+}
+
 ensure_python() {
     # The ADI Environment Modules shell code references unset variables (e.g.
     # ECHON in meta_echo), which aborts under `set -u`. Disable nounset around
@@ -98,8 +112,22 @@ ensure_python() {
         fi
     fi
     if type module >/dev/null 2>&1; then
-        module load $PY_MODULE >/dev/null 2>&1 && ok "loaded $PY_MODULE" \
-            || warn "could not load $PY_MODULE — using whatever python3 is on PATH"
+        if module load $PY_MODULE >/dev/null 2>&1; then
+            ok "loaded $PY_MODULE"
+        else
+            # The pinned version may have been retired; fall back to the newest
+            # available module in the same family (e.g. python/adi/*) so the
+            # installer keeps working after ADI bumps module versions.
+            local _fam _newest
+            _fam="${PY_MODULE%/*}"
+            _newest="$(_latest_module "$_fam")"
+            if [ -n "$_newest" ] && module load "$_newest" >/dev/null 2>&1; then
+                ok "loaded $_newest (pinned $PY_MODULE unavailable)"
+                PY_MODULE="$_newest"
+            else
+                warn "could not load $PY_MODULE — using whatever python3 is on PATH"
+            fi
+        fi
     else
         warn "could not initialise Environment Modules — continuing with system python"
     fi
@@ -137,6 +165,12 @@ publish_share() {
     echo "=== autosuggest-cli : publish shared copy ================================="
     if [ -d "$dest/.git" ]; then
         say "updating shared copy at $dest ..."
+        # Refuse to discard uncommitted local changes in the shared clone
+        # unless the maintainer explicitly opts in with FORCE_PUBLISH=1.
+        if [ -z "${FORCE_PUBLISH:-}" ] \
+            && [ -n "$(git -C "$dest" status --porcelain 2>/dev/null)" ]; then
+            die "$dest has uncommitted local changes; commit or stash them, or re-run with FORCE_PUBLISH=1 to discard them"
+        fi
         git -C "$dest" fetch --quiet origin \
             && git -C "$dest" reset --hard --quiet origin/master \
             || die "git update failed in $dest"
