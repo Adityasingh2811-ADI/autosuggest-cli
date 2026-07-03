@@ -42,13 +42,16 @@ _autosuggest_resolve_python() {
 _autosuggest_resolve_python
 
 _autosuggest_ensure_daemon() {
-    # Check if daemon is already listening (Unix socket or TCP fallback)
-    if [[ -S "$_autosuggest_sock" ]]; then
+    # A live daemon answers on the socket. A leftover socket file from a killed
+    # daemon must NOT be mistaken for a live one, so connect-probe it rather
+    # than just checking that the file exists.
+    if [[ -S "$_autosuggest_sock" ]] && command -v socat &>/dev/null \
+       && socat -T1 - UNIX-CONNECT:"$_autosuggest_sock" </dev/null &>/dev/null; then
         return
     fi
-    (echo "" > /dev/tcp/127.0.0.1/19526) 2>/dev/null && return
-
-    # Not running — start it detached
+    # Not answering (dead, stale socket, or never started) -> (re)start it. The
+    # daemon reaps any stale socket and holds a singleton lock, so a duplicate
+    # start is harmless.
     if command -v suggest-daemon &>/dev/null; then
         suggest-daemon start </dev/null >>"$_autosuggest_log" 2>&1 &
         disown
@@ -206,17 +209,10 @@ elif command -v python &>/dev/null; then
 fi
 
 _autosuggest_ensure_daemon() {
-    if [[ -S "$_autosuggest_sock" ]]; then
-        return
-    fi
-    # zsh has no /dev/tcp; probe the TCP fallback via python when available.
-    if [[ -n "$_autosuggest_python" ]] && "$_autosuggest_python" -c "
-import socket,sys
-try:
-    s=socket.socket();s.settimeout(0.1);s.connect(('127.0.0.1',19526));s.close()
-except Exception:
-    sys.exit(1)
-" 2>/dev/null; then
+    # Connect-probe the socket; a leftover socket file from a killed daemon must
+    # not be mistaken for a live one (else it never gets restarted).
+    if [[ -S "$_autosuggest_sock" ]] && command -v socat &>/dev/null \
+       && socat -T1 - UNIX-CONNECT:"$_autosuggest_sock" </dev/null &>/dev/null; then
         return
     fi
     if command -v suggest-daemon &>/dev/null; then
@@ -867,14 +863,25 @@ endif
 
 # Start the telemetry daemon if it is not already running (best-effort).
 if ( "$_AUTOSUGGEST_PY" != "" ) then
-    if ( $?XDG_RUNTIME_DIR ) then
-        set _as_sock = "$XDG_RUNTIME_DIR/autosuggest.sock"
-        set _as_log = "$XDG_RUNTIME_DIR/daemon.log"
-    else
+    if ( ! $?XDG_RUNTIME_DIR ) then
         set _as_sock = "/tmp/autosuggest-`id -u`/autosuggest.sock"
         set _as_log = "/tmp/autosuggest-`id -u`/daemon.log"
+    else
+        set _as_sock = "$XDG_RUNTIME_DIR/autosuggest.sock"
+        set _as_log = "$XDG_RUNTIME_DIR/daemon.log"
     endif
-    if ( ! -e "$_as_sock" ) then
+    # (Re)start the daemon unless a LIVE one answers on the socket. A leftover
+    # socket file from a killed daemon must not block the restart, so probe it.
+    set _as_start = 1
+    if ( -e "$_as_sock" ) then
+        if ( -X socat ) then
+            socat -T1 - UNIX-CONNECT:"$_as_sock" < /dev/null >& /dev/null
+            if ( $status == 0 ) set _as_start = 0
+        else
+            set _as_start = 0
+        endif
+    endif
+    if ( $_as_start ) then
         # Log start errors (port in use, etc.) instead of discarding them.
         if ( -X suggest-daemon ) then
             ( suggest-daemon start >>& "$_as_log" & )
@@ -884,6 +891,7 @@ if ( "$_AUTOSUGGEST_PY" != "" ) then
     endif
     unset _as_sock
     unset _as_log
+    unset _as_start
 endif
 
 # precmd runs before every prompt: record the command just finished and show
