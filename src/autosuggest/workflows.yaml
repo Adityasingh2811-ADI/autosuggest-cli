@@ -65,3 +65,60 @@ workflows:
         next: ["cd", "cat", "code ."]
       - pattern: "dir*"
         next: ["cd", "type", "code ."]
+
+  # --- EDA / CAD flows for ADI managed hosts (Vivado, Perforce, sim, modules) ---
+  - name: "vivado"
+    steps:
+      - pattern: "vivado -mode batch*"
+        next:
+          - "cat vivado.log"
+          - "grep -i error *.rpt"
+          - "vivado -mode gui"
+      - pattern: "vivado -mode tcl*"
+        next: ["cat vivado.log", "vivado -mode gui"]
+      - pattern: "vivado -source*"
+        next: ["cat vivado.log", "grep -i 'critical warning' *.log", "vivado -mode gui"]
+
+  - name: "perforce"
+    steps:
+      - pattern: "p4 sync*"
+        next: ["p4 opened", "p4 status", "p4 changes -m 5"]
+      - pattern: "p4 edit *"
+        next: ["p4 diff", "p4 opened", "p4 revert"]
+      - pattern: "p4 add *"
+        next: ["p4 opened", "p4 submit", "p4 revert"]
+      - pattern: "p4 opened*"
+        next: ["p4 diff", "p4 submit", "p4 revert"]
+      - pattern: "p4 diff*"
+        next: ["p4 submit", "p4 revert", "p4 opened"]
+      - pattern: "p4 submit*"
+        next: ["p4 sync", "p4 changes -m 5"]
+      - pattern: "p4 change*"
+        next: ["p4 submit", "p4 opened"]
+
+  - name: "simulation"
+    steps:
+      - pattern: "xsim *"
+        next: ["cat simulate.log", "grep -i error *.log", "gtkwave *.wdb"]
+      - pattern: "xvlog *"
+        next: ["xelab", "xsim"]
+      - pattern: "xelab *"
+        next: ["xsim", "cat elaborate.log"]
+      - pattern: "vsim *"
+        next: ["cat transcript", "grep -i error transcript", "gtkwave"]
+      - pattern: "vlog *"
+        next: ["vsim", "cat transcript"]
+      - pattern: "irun *"
+        next: ["cat irun.log", "simvision"]
+      - pattern: "xrun *"
+        next: ["cat xrun.log", "simvision"]
+
+  - name: "modules"
+    steps:
+      - pattern: "module load *"
+        next: ["module list", "which vivado", "which p4"]
+      - pattern: "module avail*"
+        next: ["module load", "module list"]
+      - pattern: "module list*"
+        next: ["module load", "module purge"]
+
