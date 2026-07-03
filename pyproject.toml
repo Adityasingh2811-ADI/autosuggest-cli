@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cli-autosuggest"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A context-aware CLI autosuggestion engine."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,6 +32,9 @@ suggest-seed = "autosuggest.seed:run_seed"
 
 [tool.setuptools.package-data]
 autosuggest = ["schema.sql", "workflows.yaml", "seed_commands.json"]
+
+[tool.setuptools.dynamic]
+version = {attr = "autosuggest.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
