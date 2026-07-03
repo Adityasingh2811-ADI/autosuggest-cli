@@ -26,6 +26,7 @@
 #       PKG_SOURCE       what pip installs        (default: this repo if run from a clone, else the git URL)
 #       AUTOSUGGEST_SHARE  public path for 'publish' (default: $HOME/autosuggest-cli)
 #       NO_CLEAN=1       skip the clean-uninstall step before installing
+#       NO_IMPORT=1      skip the one-time history import (suggest-import)
 #       NO_AUTOLAUNCH=1  set up bash but do NOT auto-exec bash from csh login
 #
 #   KILL SWITCH (after install):
@@ -240,6 +241,19 @@ command -v suggest-hook >/dev/null 2>&1 \
     && ok "suggest-hook found at $(command -v suggest-hook)" \
     || warn "suggest-hook not on PATH yet (the dotfiles below will fix that at login)"
 
+# ---- 3a. seed suggestions from existing history (one-time) -----------------
+IMPORT_SENTINEL="$HOME/.cli_autosuggest.imported"
+if [ "${NO_IMPORT:-0}" != "1" ] && [ ! -f "$IMPORT_SENTINEL" ] \
+   && command -v suggest-import >/dev/null 2>&1; then
+    say "seeding suggestions from your existing history (one-time) ..."
+    if suggest-import >/dev/null 2>&1; then
+        : > "$IMPORT_SENTINEL" 2>/dev/null || true
+        ok "history imported"
+    else
+        warn "history import skipped (nothing to import yet)"
+    fi
+fi
+
 # ---- 4. write ~/.suggest_bashrc (we own this file) -------------------------
 # Order matters:
 #   1) user's normal bashrc      -> baseline environment
@@ -291,10 +305,16 @@ if grep -qF "$BEGIN" "$CSHRC_USER" 2>/dev/null; then
 fi
 
 if [ "${NO_AUTOLAUNCH:-0}" = "1" ]; then
-    AUTOLAUNCH_BODY="    # auto-launch disabled (NO_AUTOLAUNCH=1); run 'suggest-start' manually
+    AUTOLAUNCH_BODY="    # raise the (managed) tcsh history cap so ~/.history accumulates
+    set history = 10000
+    set savehist = (10000 merge)
+    # auto-launch disabled (NO_AUTOLAUNCH=1); run 'suggest-start' manually
     alias suggest-start 'bash --rcfile ~/.suggest_bashrc -i'"
 else
-    AUTOLAUNCH_BODY="    alias suggest-start 'bash --rcfile ~/.suggest_bashrc -i'
+    AUTOLAUNCH_BODY="    # raise the (managed) tcsh history cap so ~/.history accumulates
+    set history = 10000
+    set savehist = (10000 merge)
+    alias suggest-start 'bash --rcfile ~/.suggest_bashrc -i'
     # auto-enter the hooked bash for interactive logins (kill switch: ~/.no_autosuggest).
     # NOTE: no 'exec' — so typing 'exit' in bash returns to this tcsh login
     # shell instead of closing the terminal.
