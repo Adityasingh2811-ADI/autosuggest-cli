@@ -178,6 +178,11 @@ def _ensure_daemon() -> None:
 
 
 def main() -> None:
+    if "--version" in sys.argv[1:]:
+        from autosuggest import __version__
+
+        print(f"suggest {__version__}")
+        return
     _ensure_daemon()
     engine = PredictionEngine()
     resolver = NextStepResolver(engine)

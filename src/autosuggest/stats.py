@@ -203,6 +203,11 @@ def run() -> None:
     ap.add_argument("--dir", metavar="PATH", help="only count commands run in this directory")
     ap.add_argument("--after", metavar="CMD", help="show commands usually run after CMD")
     ap.add_argument("--json", action="store_true", help="machine-readable top commands")
+    from autosuggest import __version__
+
+    ap.add_argument(
+        "--version", action="version", version=f"suggest-stats {__version__}"
+    )
     args = ap.parse_args()
 
     if args.after:
