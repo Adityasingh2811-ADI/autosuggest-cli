@@ -235,3 +235,19 @@ def test_dedupe_is_idempotent_on_clean_db():
     assert daemon.dedupe_history(db) == 0
 
 
+def test_run_daemon_start_detaches_by_default(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(daemon, "_cmd_start", lambda foreground=False: captured.update(fg=foreground))
+    monkeypatch.setattr(daemon.sys, "argv", ["suggest-daemon", "start"])
+    daemon.run_daemon()
+    assert captured["fg"] is False
+
+
+def test_run_daemon_start_foreground_flag(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(daemon, "_cmd_start", lambda foreground=False: captured.update(fg=foreground))
+    monkeypatch.setattr(daemon.sys, "argv", ["suggest-daemon", "start", "--foreground"])
+    daemon.run_daemon()
+    assert captured["fg"] is True
+
+
