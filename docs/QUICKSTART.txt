@@ -1,0 +1,117 @@
+==============================================================================
+  autosuggest-cli  —  QUICK SETUP  (read me first)
+==============================================================================
+
+  What this is:
+  A little helper that suggests the next command you probably want to type,
+  based on your own history. Built for managed ADI hosts (tcsh login, via
+  Exceed TurboX / EDA-CAD farms); also works on your own bash/zsh machine.
+
+  IMPORTANT: nothing runs by itself. You run ONE command, ONE time. After
+  that, every new login sets itself up for you.
+
+
+------------------------------------------------------------------------------
+  MANAGED ADI HOST (Exceed TurboX / EDA-CAD)  —  the two-command setup
+------------------------------------------------------------------------------
+
+  You do NOT need git, GitHub access, or a newer Python. Your team lead
+  publishes a shared copy; you install from it:
+
+      bash <shared-path>/autosuggest-cli/install-linux.sh
+      rehash
+
+  Replace <shared-path> with the path your team lead gave you
+  (for example:  /home/<lead>/autosuggest-cli ).
+
+  That single installer does everything:
+      - loads a modern Python for you (the system one is too old)
+      - installs the tool into your own ~/.local  (offline, no network)
+      - fixes your PATH and writes your shell startup files
+      - seeds suggestions from your existing history (no separate step)
+      - sets you up to drop into a hooked bash automatically at login
+
+  Re-running it later is safe — it cleanly reinstalls, never duplicates.
+
+
+------------------------------------------------------------------------------
+  START USING IT
+------------------------------------------------------------------------------
+
+  Right now (without logging out):
+
+      suggest-start        <- a shell with Python + Perforce + modules ready.
+                              Type 'exit' to return to your tcsh prompt.
+
+  Or just open a new terminal — you land in it automatically.
+
+  Prefer a self-contained helper window that works in ANY shell? Run:
+
+      suggest
+
+  Inside either one:
+      - Grey text = a suggestion.  Press Right Arrow (->) to accept it.
+      - Press Tab for a menu of ranked suggestions.
+      - After a command, a short "Next steps:" list appears; type the
+        number (1-3) to run one.
+      - Type  exit  (or Ctrl+D) to leave.
+
+  The more you use it, the smarter it gets.
+
+
+------------------------------------------------------------------------------
+  YOUR OWN MACHINE (bash / zsh, Python 3.10+)  —  alternative
+------------------------------------------------------------------------------
+
+  If you are NOT on a managed host and already have Python 3.10+:
+
+      git clone https://github.com/Adityasingh2811-ADI/autosuggest-cli.git
+      cd autosuggest-cli
+      bash setup-suggest.sh
+
+  It detects your shell, installs the tool, fixes PATH, adds the correct
+  hook (bash -> ~/.bashrc, zsh -> ~/.zshrc), and imports your history once.
+  Then reload:  source ~/.bashrc   (or just open a new terminal).
+
+
+------------------------------------------------------------------------------
+  IF SOMETHING DOESN'T WORK
+------------------------------------------------------------------------------
+
+  "suggest: Command not found"  /  "suggest-start: Command not found"
+      Your shell hasn't picked up the new commands yet. Fix it:
+
+        tcsh / csh :   set path = ( $HOME/.local/bin $path ) ; rehash
+        bash / zsh :   export PATH="$HOME/.local/bin:$PATH"
+
+      Then try again. (A fresh login fixes this automatically.)
+
+  "Illegal variable name"  (tcsh/csh users)
+      You pasted a bash-style line containing  $(...)  into tcsh. Don't —
+      use the installer above, or `suggest-start` / `suggest`. tcsh cannot
+      parse  $(...) .
+
+  Re-run the installer any time to repair things:
+
+        bash <shared-path>/autosuggest-cli/install-linux.sh
+
+
+------------------------------------------------------------------------------
+  TURN IT OFF
+------------------------------------------------------------------------------
+
+  Temporarily (stops the auto-launch into bash at login):
+
+        touch ~/.no_autosuggest        (re-enable:  rm ~/.no_autosuggest)
+        exec tcsh -f                    (plain tcsh for the current session)
+
+  Permanently: delete the block between these two markers in ~/.cshrc.user
+  (or ~/.bashrc / ~/.zshrc on your own machine):
+
+        # >>> autosuggest-cli >>>
+        # <<< autosuggest-cli <<<
+
+  Then open a new terminal. Your saved history is never deleted — it just
+  stops suggesting.
+
+==============================================================================
