@@ -42,6 +42,20 @@ _AUTH = re.compile(r"(Authorization:\s*\S+\s+)[^\s\"']+", re.IGNORECASE)
 # user:pass@host inside a URL
 _URLCRED = re.compile(r"(://[^\s:/@]+:)[^\s@/]+(@)")
 
+# sshpass -p<pass> / -P <passfile> — catches the glued form the flag matcher misses.
+_SSHPASS = re.compile(r"(\bsshpass\s+-[pP])\s*(\S+)")
+
+# ssh-keygen passphrases: -N <new> / -P <old>
+_KEYGEN_PASS = re.compile(
+    r"(\bssh-keygen\b[^\n]*?\s-[NP])(\s*=?\s*)(\"[^\"]*\"|'[^']*'|\S+)"
+)
+
+# echo/printf <secret> | ... --password-stdin  (secret lives in the pipe source)
+_STDIN_PASS = re.compile(
+    r"(\b(?:echo|printf)\s+)(\"[^\"]*\"|'[^']*'|[^|]+?)(\s*\|\s*[^\n]*--password-stdin)",
+    re.IGNORECASE,
+)
+
 # High-entropy / well-known token shapes anywhere on the line.
 _BLOBS = (
     re.compile(r"\bghp_[A-Za-z0-9]{20,}\b"),                 # GitHub PAT
@@ -63,6 +77,9 @@ def redact(command: str) -> str:
     out = _ENV.sub(lambda m: f"{m.group(1)}={MASK}", out)
     out = _AUTH.sub(lambda m: f"{m.group(1)}{MASK}", out)
     out = _URLCRED.sub(lambda m: f"{m.group(1)}{MASK}{m.group(2)}", out)
+    out = _STDIN_PASS.sub(lambda m: f"{m.group(1)}{MASK}{m.group(3)}", out)
+    out = _SSHPASS.sub(lambda m: f"{m.group(1)} {MASK}", out)
+    out = _KEYGEN_PASS.sub(lambda m: f"{m.group(1)}{m.group(2)}{MASK}", out)
     for pat in _BLOBS:
         out = pat.sub(MASK, out)
     return out
