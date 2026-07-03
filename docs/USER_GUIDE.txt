@@ -2,10 +2,23 @@
                     AUTOSUGGEST-CLI — USER GUIDE
 ================================================================================
 
-  Version:  0.5.0
-  Date:     2026-07-01
+  Version:  0.6.0
+  Date:     2026-07-03
   Platform: Windows 10/11, Linux, macOS
   Author:   ASingh56 / CLI Tooling Team, Analog Devices
+
+================================================================================
+WHAT'S NEW (v0.6.0)
+================================================================================
+
+  - One-command install: the managed-host installer now seeds your history
+    automatically at install time — you no longer run `suggest-import`
+    yourself.
+  - `suggest-start` fixed: exiting the hooked bash now returns you to your
+    tcsh prompt instead of closing the terminal window.
+  - Smarter history import: `suggest-import` now also reads tcsh/csh history
+    (~/.history), and the installer raises the managed tcsh history cap
+    (40 -> 10000) so it actually accumulates over time.
 
 ================================================================================
 TABLE OF CONTENTS
@@ -40,15 +53,21 @@ TABLE OF CONTENTS
 
   A) MANAGED ADI HOST (Exceed TurboX / EDA-CAD farm, tcsh login) — RECOMMENDED
   ---------------------------------------------------------------------------
-  Your team lead publishes a shared copy; you install from it. No git, no
-  network, no worrying about which Python is the default:
+  Your team lead publishes a shared copy; you install from it with TWO
+  commands. No git, no network, no worrying about which Python is the
+  default, and it seeds your history for you (no separate suggest-import):
 
       bash <shared-path>/autosuggest-cli/install-linux.sh
       rehash
-      suggest-start        # a hooked bash with Python + Perforce + modules
 
-  (Ask your team lead for the exact <shared-path>. Re-running the
-  installer is safe — it clean-reinstalls.)
+  Then start it:
+
+      suggest-start        # hooked bash with Python + Perforce + modules;
+                           # type 'exit' to return to your tcsh prompt
+
+  (Ask your team lead for the exact <shared-path>. Re-running the installer
+  is safe — it clean-reinstalls. New logins drop you into the hooked bash
+  automatically.)
 
   B) JUST WANT THE HELPER WINDOW (any shell, any OS)
   --------------------------------------------------
@@ -616,20 +635,33 @@ TABLE OF CONTENTS
   Your shell has years of command history. Import it for immediate
   suggestions instead of starting from scratch.
 
+  NOTE: on managed ADI hosts the installer runs this for you automatically
+  (once) at install time — you normally don't need to run it by hand.
+
   AUTO-DETECT (RECOMMENDED)
   -------------------------
     suggest-import
 
-  This finds and imports all available history files.
+  This finds and imports all available history files (bash, zsh, tcsh/csh,
+  and PowerShell).
 
   IMPORT SPECIFIC FILES
   ---------------------
     suggest-import --bash ~/.bash_history
+    suggest-import --tcsh ~/.history
     suggest-import --powershell "C:\path\to\ConsoleHost_history.txt"
 
   FIND YOUR POWERSHELL HISTORY PATH
   ---------------------------------
     (Get-PSReadLineOption).HistorySavePath
+
+  TCSH/CSH HISTORY NOTE
+  ---------------------
+  tcsh only writes ~/.history on logout, and managed hosts often cap it low
+  (e.g. 40). The installer raises that cap to 10000 in your ~/.cshrc.user, so
+  after a re-login your tcsh history accumulates and becomes a useful import
+  source. Day-to-day, commands you run in the hooked bash are recorded live
+  regardless.
 
   WHAT GETS IMPORTED
   ------------------
@@ -745,6 +777,13 @@ TABLE OF CONTENTS
 
     Usage: suggest
 
+  suggest-start
+  -------------
+  Drop into a hooked bash that already has the ADI module environment loaded
+  (Python, Perforce, modules). Type 'exit' to return to your tcsh prompt.
+
+    Usage: suggest-start
+
   suggest-daemon [start|stop|status]
   -----------------------------------
   Manage the background telemetry daemon.
@@ -759,6 +798,8 @@ TABLE OF CONTENTS
 
     suggest-import                    Auto-detect all history files
     suggest-import --bash PATH        Import bash history
+    suggest-import --zsh PATH         Import zsh history
+    suggest-import --tcsh PATH        Import tcsh/csh history
     suggest-import --powershell PATH  Import PowerShell history
 
   suggest-hook <shell|install shell>
