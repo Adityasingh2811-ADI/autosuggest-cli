@@ -9,44 +9,113 @@ Supports subcommands: start (default), stop, status.
 import asyncio
 import json
 import os
+import secrets
 import signal
+import socket
 import sqlite3
 import subprocess
 import sys
+import time
 from pathlib import Path
 
-from autosuggest.paths import db_path, pid_path, socket_path
+from autosuggest.paths import db_path, pid_path, socket_path, token_path
 from autosuggest.redact import redact
-from autosuggest.paths import IS_WINDOWS
+from autosuggest.paths import IS_WINDOWS, journal_mode_for, TCP_HOST, TCP_PORT
 from autosuggest.engine import _SCHEMA
 
 DB_PATH = db_path()
 PID_PATH = pid_path()
 SOCKET_PATH = socket_path()
 
-TCP_HOST = "127.0.0.1"
-TCP_PORT = 19526
-
 
 def init_db() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH), isolation_level="DEFERRED", check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL;")
+    # WAL is unsafe on network filesystems (NFS/CIFS); fall back where needed.
+    conn.execute(f"PRAGMA journal_mode={journal_mode_for(DB_PATH)};")
     conn.execute("PRAGMA synchronous=NORMAL;")
     conn.execute("PRAGMA busy_timeout=5000;")
     conn.executescript(_SCHEMA)
     return conn
 
 
+# Keep the history table bounded so it can't grow without limit on long-lived
+# accounts (NFS homes especially). Tunable via env for power users.
+MAX_HISTORY_ROWS = int(os.environ.get("AUTOSUGGEST_MAX_ROWS", "50000"))
+MAX_HISTORY_AGE_DAYS = int(os.environ.get("AUTOSUGGEST_MAX_AGE_DAYS", "365"))
+
+
+def _prune_db(conn: sqlite3.Connection) -> int:
+    """Trim old/excess rows. Returns the number of rows deleted.
+
+    Deletes anything older than MAX_HISTORY_AGE_DAYS, then caps the table at
+    MAX_HISTORY_ROWS most-recent rows. Runs once at daemon startup.
+    """
+    deleted = 0
+    try:
+        if MAX_HISTORY_AGE_DAYS > 0:
+            cutoff = time.time() - MAX_HISTORY_AGE_DAYS * 86400
+            cur = conn.execute(
+                "DELETE FROM command_history WHERE timestamp < ?", (cutoff,)
+            )
+            deleted += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        if MAX_HISTORY_ROWS > 0:
+            cur = conn.execute(
+                "DELETE FROM command_history WHERE id NOT IN "
+                "(SELECT id FROM command_history ORDER BY timestamp DESC LIMIT ?)",
+                (MAX_HISTORY_ROWS,),
+            )
+            deleted += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        conn.commit()
+    except sqlite3.Error as e:
+        print(f"[daemon] prune failed: {e}", file=sys.stderr)
+    return deleted
+
+
+def _load_or_create_token() -> str:
+    """Return the per-user auth token, creating it privately if absent.
+
+    The token gates the TCP transport so that other local processes on a shared
+    host cannot inject commands into the user's history over 127.0.0.1.
+    """
+    tp = token_path()
+    try:
+        existing = tp.read_text().strip()
+        if existing:
+            return existing
+    except OSError:
+        pass
+    tok = secrets.token_hex(16)
+    old_umask = None if IS_WINDOWS else os.umask(0o077)
+    try:
+        tp.write_text(tok)
+        if not IS_WINDOWS:
+            try:
+                tp.chmod(0o600)
+            except OSError:
+                pass
+    finally:
+        if old_umask is not None:
+            os.umask(old_umask)
+    return tok
+
+
 async def handle_client(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
     db: sqlite3.Connection,
+    require_token: bool = False,
+    token: str | None = None,
 ) -> None:
     try:
         data = await asyncio.wait_for(reader.read(4096), timeout=2.0)
         if not data:
             return
         payload = json.loads(data.decode("utf-8"))
+        if require_token and not secrets.compare_digest(
+            str(payload.get("token", "")), token or ""
+        ):
+            print("[daemon] rejected packet: bad or missing token", file=sys.stderr)
+            return
         await asyncio.get_running_loop().run_in_executor(
             None, _insert_row, db, payload
         )
@@ -72,32 +141,97 @@ def _insert_row(db: sqlite3.Connection, payload: dict) -> None:
     db.commit()
 
 
+def _reap_stale_socket() -> None:
+    """Remove a leftover socket file only if nothing is listening on it.
+
+    Guards against deleting a live daemon's socket while still clearing stale
+    files left by an unclean shutdown or NFS lock.
+    """
+    if not os.path.exists(SOCKET_PATH):
+        return
+    probe = socket.socket(socket.AF_UNIX)
+    probe.settimeout(0.2)
+    try:
+        probe.connect(SOCKET_PATH)
+        # Something is already listening — leave it alone.
+        return
+    except OSError:
+        try:
+            os.remove(SOCKET_PATH)
+        except OSError:
+            pass
+    finally:
+        try:
+            probe.close()
+        except OSError:
+            pass
+
+
 async def main() -> None:
     db = init_db()
+    _prune_db(db)
+    token = _load_or_create_token()
 
     if IS_WINDOWS:
         server = await asyncio.start_server(
-            lambda r, w: handle_client(r, w, db),
+            lambda r, w: handle_client(r, w, db, require_token=True, token=token),
             host=TCP_HOST,
             port=TCP_PORT,
         )
         print(f"[daemon] listening on {TCP_HOST}:{TCP_PORT} | db: {DB_PATH}")
     else:
-        if os.path.exists(SOCKET_PATH):
-            os.remove(SOCKET_PATH)
-        server = await asyncio.start_unix_server(
-            lambda r, w: handle_client(r, w, db),
-            path=SOCKET_PATH,
-        )
-        os.chmod(SOCKET_PATH, 0o600)
+        _reap_stale_socket()
+        # Create the socket with a restrictive umask so there is no window in
+        # which it is world-connectable before we chmod it (TOCTOU fix).
+        old_umask = os.umask(0o177)
+        try:
+            server = await asyncio.start_unix_server(
+                lambda r, w: handle_client(r, w, db),
+                path=SOCKET_PATH,
+            )
+        finally:
+            os.umask(old_umask)
+        try:
+            os.chmod(SOCKET_PATH, 0o600)
+        except OSError:
+            pass
         print(f"[daemon] listening on {SOCKET_PATH} | db: {DB_PATH}")
 
     async with server:
         await server.serve_forever()
 
 
+# Held for the daemon's lifetime to enforce a single running instance.
+_singleton_lock_fh = None
+
+
 def _write_pidfile() -> None:
-    PID_PATH.write_text(str(os.getpid()))
+    """Write the pidfile atomically (write-temp + rename) to avoid torn reads."""
+    tmp = PID_PATH.with_name(f"{PID_PATH.name}.{os.getpid()}.tmp")
+    tmp.write_text(str(os.getpid()))
+    os.replace(tmp, PID_PATH)
+
+
+def _acquire_singleton_lock() -> bool:
+    """Take an exclusive lock so two concurrent starts can't both run.
+
+    Returns True if we got the lock (and should proceed), False if another
+    instance already holds it. POSIX-only; Windows relies on the pid check.
+    """
+    global _singleton_lock_fh
+    if IS_WINDOWS:
+        return True
+    import fcntl
+
+    lock_file = PID_PATH.with_suffix(".lock")
+    fh = open(lock_file, "w")
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        return False
+    _singleton_lock_fh = fh
+    return True
 
 
 def _remove_pidfile() -> None:
@@ -143,6 +277,10 @@ def _cmd_start() -> None:
     running, pid = is_daemon_running()
     if running:
         print(f"[daemon] already running (PID {pid})")
+        return
+
+    if not _acquire_singleton_lock():
+        print("[daemon] another instance is starting")
         return
 
     try:
@@ -200,6 +338,10 @@ def run_daemon() -> None:
         _cmd_stop()
     elif cmd == "status":
         _cmd_status()
+    elif cmd in ("--version", "-V"):
+        from autosuggest import __version__
+
+        print(f"suggest-daemon {__version__}")
     elif cmd in ("--help", "-h"):
         print("Usage: suggest-daemon [start|stop|status]")
         print()
