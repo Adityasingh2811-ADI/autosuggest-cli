@@ -29,14 +29,13 @@ path they gave you — it loads Python for you and installs from a local,
 offline wheelhouse into your own `~/.local`:
 
 ```bash
-bash <shared-path>/autosuggest-cli/install-linux.sh
+bash /home/asingh56/autosuggest-cli/install-linux.sh
 rehash            # tcsh only, so it finds the new commands
 suggest-start     # hooked bash with Python + Perforce + modules
 ```
 
-`<shared-path>` is whatever your team lead published to (e.g.
-`/home/<lead>/autosuggest-cli`). Re-running it is safe (it clean-reinstalls).
-Maintainers: to publish or refresh that shared copy, see
+That path is the shared copy your team lead published; re-running it is safe
+(it clean-reinstalls). Maintainers: to publish or refresh that shared copy, see
 [Publishing a shared copy](#publishing-a-shared-copy-maintainers) below.
 
 ### Managed Linux hosts (Exceed TurboX / EDA-CAD farms) — one-shot install

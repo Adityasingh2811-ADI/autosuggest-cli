@@ -57,7 +57,7 @@ TABLE OF CONTENTS
   commands. No git, no network, no worrying about which Python is the
   default, and it seeds your history for you (no separate suggest-import):
 
-      bash <shared-path>/autosuggest-cli/install-linux.sh
+      bash /home/asingh56/autosuggest-cli/install-linux.sh
       rehash
 
   Then start it:
@@ -65,9 +65,9 @@ TABLE OF CONTENTS
       suggest-start        # hooked bash with Python + Perforce + modules;
                            # type 'exit' to return to your tcsh prompt
 
-  (Ask your team lead for the exact <shared-path>. Re-running the installer
-  is safe — it clean-reinstalls. New logins drop you into the hooked bash
-  automatically.)
+  (That path is the shared copy your team lead published. Re-running the
+  installer is safe — it clean-reinstalls. New logins drop you into the
+  hooked bash automatically.)
 
   B) JUST WANT THE HELPER WINDOW (any shell, any OS)
   --------------------------------------------------
@@ -136,7 +136,7 @@ TABLE OF CONTENTS
   no network, and loads a modern Python for you (the system python3 is often
   too old). It installs into your own ~/.local:
 
-    bash <shared-path>/autosuggest-cli/install-linux.sh
+    bash /home/asingh56/autosuggest-cli/install-linux.sh
     rehash            # tcsh only, so it finds the new commands
 
   Re-running is safe (clean reinstall). Then use `suggest-start` or `suggest`.
