@@ -59,8 +59,8 @@ class TestRecord:
 
         monkeypatch.setattr(record, "_send_socket", fake_send)
         record.send_record("git status", "/home/user/project", 1)
-        assert captured == {
-            "command": "git status",
-            "cwd": "/home/user/project",
-            "exit_status": 1,
-        }
+        assert captured["command"] == "git status"
+        assert captured["cwd"] == "/home/user/project"
+        assert captured["exit_status"] == 1
+        # Auth token is included for the TCP transport (empty when no daemon token).
+        assert "token" in captured

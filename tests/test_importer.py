@@ -1,6 +1,8 @@
 """Tests for history import parsing (tcsh/csh)."""
 
-from autosuggest.importer import _parse_tcsh_history
+import sqlite3
+
+from autosuggest.importer import _bulk_insert, _parse_tcsh_history
 
 
 def test_parse_plain_tcsh_history(tmp_path):
@@ -30,3 +32,34 @@ def test_parse_tcsh_backslash_continuation(tmp_path):
 
 def test_parse_missing_tcsh_history(tmp_path):
     assert _parse_tcsh_history(tmp_path / "nope") == []
+
+
+def _make_db(path):
+    conn = sqlite3.connect(str(path))
+    conn.executescript(
+        """
+        CREATE TABLE command_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            command TEXT NOT NULL,
+            cwd TEXT NOT NULL,
+            exit_status INTEGER NOT NULL DEFAULT 0,
+            timestamp REAL NOT NULL DEFAULT 0
+        );
+        """
+    )
+    return conn
+
+
+def test_bulk_insert_dedups_repeated_import(tmp_path):
+    conn = _make_db(tmp_path / "h.db")
+    entries = [("git status", 1700000000.0), ("make", 1700000001.0)]
+
+    first = _bulk_insert(conn, entries)
+    second = _bulk_insert(conn, entries)  # re-import same file
+
+    assert first == 2
+    assert second == 0  # duplicates skipped, scores not inflated
+    total = conn.execute("SELECT COUNT(*) FROM command_history").fetchone()[0]
+    assert total == 2
+    conn.close()
+

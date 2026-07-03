@@ -19,6 +19,11 @@ from autosuggest.redact import redact
          "git clone https://user:***@github.com/x.git"),
         ("echo sk-ABCDEFGHIJKLMNOPQRSTUV", "echo ***"),
         ("aws AKIAABCDEFGHIJKLMNOP", "aws ***"),
+        ("sshpass -phunter2 ssh host", "sshpass -p *** ssh host"),
+        ("sshpass -p hunter2 ssh host", "sshpass -p *** ssh host"),
+        ("ssh-keygen -t rsa -N mypass -f key", "ssh-keygen -t rsa -N *** -f key"),
+        ("echo hunter2 | docker login --password-stdin",
+         "echo *** | docker login --password-stdin"),
     ],
 )
 def test_mask_cases(raw, expected):

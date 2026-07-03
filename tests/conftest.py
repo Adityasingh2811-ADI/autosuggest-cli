@@ -5,16 +5,9 @@ import time
 
 import pytest
 
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS command_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    command TEXT NOT NULL,
-    cwd TEXT NOT NULL,
-    exit_status INTEGER NOT NULL DEFAULT 0,
-    timestamp REAL NOT NULL DEFAULT (unixepoch('now', 'subsec'))
-);
-"""
+# Use the real production schema (including indexes) so tests exercise the same
+# index-dependent query paths the app uses in production.
+from autosuggest.engine import _SCHEMA as SCHEMA
 
 
 @pytest.fixture
