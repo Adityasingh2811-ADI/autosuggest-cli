@@ -164,3 +164,53 @@ def test_apply_journal_mode_tolerates_locked_switch(monkeypatch):
     # Must not raise.
     paths.apply_journal_mode(_LockedConn(), Path("/nfs/home/history.db"))
 
+
+def test_dedupe_collapses_repeated_imports():
+    # Simulate a pre-dedup DB: the same import ran 3x, so every
+    # (command, cwd, timestamp) triple appears 3 times.
+    db = _mem_db()
+    rows = [("git status", "~", 100.0), ("git status", "~", 101.0), ("make", "~", 102.0)]
+    for _ in range(3):
+        db.executemany(
+            "INSERT INTO command_history (command, cwd, exit_status, timestamp) "
+            "VALUES (?, ?, 0, ?)",
+            rows,
+        )
+    db.commit()
+    assert db.execute("SELECT COUNT(*) FROM command_history").fetchone()[0] == 9
+
+    removed = daemon.dedupe_history(db)
+
+    assert removed == 6  # 3 unique triples kept, 6 duplicates removed
+    remaining = db.execute("SELECT COUNT(*) FROM command_history").fetchone()[0]
+    assert remaining == 3
+
+
+def test_dedupe_preserves_within_import_frequency_and_live_rows():
+    db = _mem_db()
+    # Two distinct occurrences of the same command in one import (different
+    # spread timestamps) — legitimate frequency, must be kept.
+    db.executemany(
+        "INSERT INTO command_history (command, cwd, exit_status, timestamp) VALUES (?, ?, 0, ?)",
+        [("ls", "~", 1.0), ("ls", "~", 2.0),
+         # a live-recorded row with a real cwd + unique timestamp
+         ("ls", "/home/u/proj", 12345.678)],
+    )
+    db.commit()
+
+    removed = daemon.dedupe_history(db)
+
+    assert removed == 0
+    assert db.execute("SELECT COUNT(*) FROM command_history").fetchone()[0] == 3
+
+
+def test_dedupe_is_idempotent_on_clean_db():
+    db = _mem_db()
+    db.execute(
+        "INSERT INTO command_history (command, cwd, exit_status, timestamp) VALUES ('git', '~', 0, 1.0)"
+    )
+    db.commit()
+    assert daemon.dedupe_history(db) == 0
+    assert daemon.dedupe_history(db) == 0
+
+

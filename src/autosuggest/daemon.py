@@ -74,6 +74,31 @@ def _prune_db(conn: sqlite3.Connection) -> int:
     return deleted
 
 
+def dedupe_history(conn: sqlite3.Connection) -> int:
+    """Collapse exact-duplicate rows and return how many were removed.
+
+    Pre-dedup versions of ``suggest-import`` inserted without a uniqueness
+    guard, so re-running it multiplied identical (command, cwd, timestamp)
+    rows and inflated frecency scores. This keeps one row per
+    (command, cwd, timestamp): distinct occurrences within a single import
+    (which get spread-out timestamps) are preserved, and live-recorded rows
+    (unique high-resolution timestamps) are never touched. Idempotent and
+    safe to run on every startup — a clean DB yields zero deletions.
+    """
+    removed = 0
+    try:
+        cur = conn.execute(
+            "DELETE FROM command_history WHERE id NOT IN "
+            "(SELECT MIN(id) FROM command_history "
+            " GROUP BY command, cwd, timestamp)"
+        )
+        removed = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        conn.commit()
+    except sqlite3.Error as e:
+        print(f"[daemon] dedupe failed: {e}", file=sys.stderr)
+    return removed
+
+
 def _load_or_create_token() -> str:
     """Return the per-user auth token, creating it privately if absent.
 
@@ -172,6 +197,9 @@ def _reap_stale_socket() -> None:
 
 async def main() -> None:
     db = init_db()
+    removed = dedupe_history(db)
+    if removed:
+        print(f"[daemon] removed {removed} duplicate rows from earlier imports")
     _prune_db(db)
     token = _load_or_create_token()
 

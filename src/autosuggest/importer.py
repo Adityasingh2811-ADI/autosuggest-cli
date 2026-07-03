@@ -10,7 +10,7 @@ import sys
 import time
 from pathlib import Path
 
-from autosuggest.daemon import DB_PATH, init_db
+from autosuggest.daemon import DB_PATH, init_db, dedupe_history
 from autosuggest.redact import redact
 
 BASH_HISTORY_PATH = Path.home() / ".bash_history"
@@ -302,6 +302,16 @@ def run_import() -> None:
 
         print(f"suggest-import {__version__}")
         return
+
+    # Clean up duplicate rows left by older (pre-dedup) imports before adding
+    # anything new, so upgrading users don't keep inflated frecency scores.
+    conn = init_db()
+    try:
+        removed = dedupe_history(conn)
+        if removed:
+            print(f"[import] removed {removed} duplicate rows from earlier imports")
+    finally:
+        conn.close()
 
     if not args:
         # Auto-detect: import all available history files
