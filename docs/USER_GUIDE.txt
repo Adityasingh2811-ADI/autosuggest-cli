@@ -158,6 +158,7 @@ TABLE OF CONTENTS
   -------------------
   Run these commands — each should produce output without error:
 
+    suggest-selftest                   # PASS/FAIL health report (best first check)
     suggest --help
     suggest-daemon status
     suggest-import --help
@@ -174,6 +175,7 @@ TABLE OF CONTENTS
     suggest-hook         Shell integration hooks
     suggest-nextsteps    Next-step suggestion CLI
     suggest-stats        Usage statistics
+    suggest-selftest     Non-interactive health check (PASS/FAIL report)
 
 ================================================================================
 4. QUICK START (5 MINUTES)

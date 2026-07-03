@@ -82,6 +82,16 @@
   IF SOMETHING DOESN'T WORK
 ------------------------------------------------------------------------------
 
+  Not sure it's working? Check everything at once:
+
+        suggest-selftest       <- PASS/FAIL health report + live/imported counts
+        suggest-daemon status  <- is the background recorder running?
+
+      In suggest-selftest, the "history rows" line shows a "live" count that
+      climbs as you use commands — that's proof recording works. (Even if the
+      daemon is down, commands are still recorded via a direct fallback, so
+      nothing is ever lost.)
+
   "suggest: Command not found"  /  "suggest-start: Command not found"
       Your shell hasn't picked up the new commands yet. Fix it:
 
