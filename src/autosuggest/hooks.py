@@ -58,45 +58,26 @@ _autosuggest_ensure_daemon() {
     fi
 }
 
-# Send a JSON payload to the daemon, fire-and-forget. Prefers the Unix socket
-# (via socat when available, else a short python one-shot) and falls back to TCP.
+# Deliver one command to the daemon. Fast path: the Unix socket via socat (no
+# python). If the daemon is unreachable, fall back to record.py, which retries
+# the socket and then writes straight to the DB — so a command is never lost.
 _autosuggest_send() {
-    local payload="$1"
-    if [[ -S "$_autosuggest_sock" ]]; then
-        if command -v socat &>/dev/null; then
-            # -T2: bail out after 2s of inactivity so a broken pipe can't leak.
-            printf '%s' "$payload" | socat -T2 - UNIX-CONNECT:"$_autosuggest_sock" 2>/dev/null &
-            disown 2>/dev/null
-            return
-        fi
-        if [ -n "$_autosuggest_python" ]; then
-            "$_autosuggest_python" -c "
-import socket,sys
-try:
-    s=socket.socket(socket.AF_UNIX);s.settimeout(0.1)
-    s.connect('$_autosuggest_sock');s.sendall(sys.stdin.buffer.read());s.close()
-except Exception:
-    pass
-" <<< "$payload" 2>/dev/null &
-            disown 2>/dev/null
+    local cmd="$1" cwd="$2" st="$3"
+
+    if [[ -S "$_autosuggest_sock" ]] && command -v socat &>/dev/null; then
+        local ec="${cmd//\\/\\\\}"; ec="${ec//\"/\\\"}"
+        local ew="${cwd//\\/\\\\}"; ew="${ew//\"/\\\"}"
+        local payload
+        payload=$(printf '{"command":"%s","cwd":"%s","exit_status":%d}' "$ec" "$ew" "$st")
+        # A local socket round-trip is sub-millisecond; -T2 caps a hung daemon.
+        if printf '%s' "$payload" | socat -T2 - UNIX-CONNECT:"$_autosuggest_sock" >/dev/null 2>&1; then
             return
         fi
     fi
-    # TCP fallback (works on WSL/Windows-hosted daemons and when no socket helper)
-    if (exec 3<>/dev/tcp/127.0.0.1/19526) 2>/dev/null; then
-        printf '%s' "$payload" >&3 2>/dev/null
-        exec 3>&- 2>/dev/null
-        return
-    fi
+
+    # Daemon unreachable: record.py retries the socket, then writes to the DB.
     if [ -n "$_autosuggest_python" ]; then
-        "$_autosuggest_python" -c "
-import socket,sys
-try:
-    s=socket.socket();s.settimeout(0.1);s.connect(('127.0.0.1',19526))
-    s.sendall(sys.stdin.buffer.read());s.close()
-except Exception:
-    pass
-" <<< "$payload" 2>/dev/null &
+        "$_autosuggest_python" -m autosuggest.record "$cmd" "$cwd" "$st" >/dev/null 2>&1 &
         disown 2>/dev/null
     fi
 }
@@ -125,15 +106,7 @@ _autosuggest_hook() {
         return
     fi
 
-    # Escape backslashes and double quotes for JSON
-    local escaped_cmd="${cmd//\\/\\\\}"
-    escaped_cmd="${escaped_cmd//\"/\\\"}"
-    local escaped_cwd="${PWD//\\/\\\\}"
-    escaped_cwd="${escaped_cwd//\"/\\\"}"
-
-    local payload
-    payload=$(printf '{"command":"%s","cwd":"%s","exit_status":%d}' "$escaped_cmd" "$escaped_cwd" "$exit_status")
-    _autosuggest_send "$payload"
+    _autosuggest_send "$cmd" "$PWD" "$exit_status"
 
     # Show next-step suggestions for the command just run
     if [ -z "$AUTOSUGGEST_NO_NEXTSTEPS" ] && [ -n "$_autosuggest_python" ]; then
@@ -254,35 +227,22 @@ except Exception:
 }
 
 _autosuggest_send() {
-    local payload="$1"
-    if [[ -S "$_autosuggest_sock" ]]; then
-        if command -v socat &>/dev/null; then
-            # -T2: bail out after 2s of inactivity so a broken pipe can't leak.
-            printf '%s' "$payload" | socat -T2 - UNIX-CONNECT:"$_autosuggest_sock" 2>/dev/null &!
-            return
-        fi
-        if [[ -n "$_autosuggest_python" ]]; then
-            "$_autosuggest_python" -c "
-import socket,sys
-try:
-    s=socket.socket(socket.AF_UNIX);s.settimeout(0.1)
-    s.connect('$_autosuggest_sock');s.sendall(sys.stdin.buffer.read());s.close()
-except Exception:
-    pass
-" <<< "$payload" 2>/dev/null &!
+    local cmd="$1" cwd="$2" st="$3"
+
+    if [[ -S "$_autosuggest_sock" ]] && command -v socat &>/dev/null; then
+        local ec="${cmd//\\/\\\\}"; ec="${ec//\"/\\\"}"
+        local ew="${cwd//\\/\\\\}"; ew="${ew//\"/\\\"}"
+        local payload
+        payload=$(printf '{"command":"%s","cwd":"%s","exit_status":%d}' "$ec" "$ew" "$st")
+        # A local socket round-trip is sub-millisecond; -T2 caps a hung daemon.
+        if printf '%s' "$payload" | socat -T2 - UNIX-CONNECT:"$_autosuggest_sock" >/dev/null 2>&1; then
             return
         fi
     fi
-    # zsh lacks /dev/tcp; use a python one-shot for the TCP fallback.
+
+    # Daemon unreachable: record.py retries the socket, then writes to the DB.
     if [[ -n "$_autosuggest_python" ]]; then
-        "$_autosuggest_python" -c "
-import socket,sys
-try:
-    s=socket.socket();s.settimeout(0.1);s.connect(('127.0.0.1',19526))
-    s.sendall(sys.stdin.buffer.read());s.close()
-except Exception:
-    pass
-" <<< "$payload" 2>/dev/null &!
+        "$_autosuggest_python" -m autosuggest.record "$cmd" "$cwd" "$st" >/dev/null 2>&1 &!
     fi
 }
 
@@ -303,13 +263,7 @@ _autosuggest_precmd() {
     fi
     _autosuggest_last_hist="$cmd"
 
-    local escaped_cmd="${cmd//\\/\\\\}"
-    escaped_cmd="${escaped_cmd//\"/\\\"}"
-    local escaped_cwd="${PWD//\\/\\\\}"
-    escaped_cwd="${escaped_cwd//\"/\\\"}"
-    local payload
-    payload=$(printf '{"command":"%s","cwd":"%s","exit_status":%d}' "$escaped_cmd" "$escaped_cwd" "$exit_status")
-    _autosuggest_send "$payload"
+    _autosuggest_send "$cmd" "$PWD" "$exit_status"
 
     if [[ -z "$AUTOSUGGEST_NO_NEXTSTEPS" && -n "$_autosuggest_python" ]]; then
         local steps
