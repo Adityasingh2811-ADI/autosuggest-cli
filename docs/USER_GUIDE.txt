@@ -43,11 +43,11 @@ TABLE OF CONTENTS
   Your team lead publishes a shared copy; you install from it. No git, no
   network, no worrying about which Python is the default:
 
-      bash /proj_nobackup/ee_sandbox/tools/autosuggest-cli/install-linux.sh
+      bash <shared-path>/autosuggest-cli/install-linux.sh
       rehash
       suggest-start        # a hooked bash with Python + Perforce + modules
 
-  (Ask your team lead for the exact path if it differs. Re-running the
+  (Ask your team lead for the exact <shared-path>. Re-running the
   installer is safe — it clean-reinstalls.)
 
   B) JUST WANT THE HELPER WINDOW (any shell, any OS)
@@ -117,7 +117,7 @@ TABLE OF CONTENTS
   no network, and loads a modern Python for you (the system python3 is often
   too old). It installs into your own ~/.local:
 
-    bash /proj_nobackup/ee_sandbox/tools/autosuggest-cli/install-linux.sh
+    bash <shared-path>/autosuggest-cli/install-linux.sh
     rehash            # tcsh only, so it finds the new commands
 
   Re-running is safe (clean reinstall). Then use `suggest-start` or `suggest`.

@@ -16,7 +16,7 @@
 #   USAGE (from csh/tcsh or bash):
 #       bash install-linux.sh            # per-user install (clean reinstall)
 #       bash install-linux.sh publish    # maintainer: deploy shared copy
-#                                        #   (needs AUTOSUGGEST_SHARE=/path)
+#                                        #   (default dest: $HOME/autosuggest-cli)
 #
 #   then either log out / log back in, or run:  suggest-start
 #
@@ -24,7 +24,7 @@
 #       PY_MODULE        python module to load   (default: python/adi/3.12.2)
 #       P4_MODULES       perforce modules         (default: perforce/adi/r19.1 p4v/adi/p4v-2024.1.2591061)
 #       PKG_SOURCE       what pip installs        (default: this repo if run from a clone, else the git URL)
-#       AUTOSUGGEST_SHARE  public path for 'publish' (shared clone location)
+#       AUTOSUGGEST_SHARE  public path for 'publish' (default: $HOME/autosuggest-cli)
 #       NO_CLEAN=1       skip the clean-uninstall step before installing
 #       NO_AUTOLAUNCH=1  set up bash but do NOT auto-exec bash from csh login
 #
@@ -58,6 +58,24 @@ say()  { printf '  %s\n' "$*"; }
 ok()   { printf '  [ok] %s\n' "$*"; }
 warn() { printf '  [!!] %s\n' "$*" >&2; }
 die()  { printf '\n  ERROR: %s\n' "$*" >&2; exit 1; }
+
+# List path components that would block a NON-group user from reaching $1:
+# parent dirs missing other-execute (traverse), or the file missing other-read.
+_unreachable_by_others() {
+    local file="$1" bad="" acc="" comp o dir
+    dir="$(dirname "$file")"
+    local OLDIFS="$IFS"; IFS='/'
+    for comp in $dir; do
+        [ -z "$comp" ] && continue
+        acc="$acc/$comp"
+        o="$(stat -c '%a' "$acc" 2>/dev/null || echo 0)"
+        if [ $(( 10#$o % 10 & 1 )) -eq 0 ]; then bad="$bad $acc"; fi
+    done
+    IFS="$OLDIFS"
+    o="$(stat -c '%a' "$file" 2>/dev/null || echo 0)"
+    if [ $(( 10#$o % 10 & 4 )) -eq 0 ]; then bad="$bad $file(needs-o+r)"; fi
+    printf '%s' "$bad"
+}
 
 # ---- shared: make a Python >= 3.10 available, set $PYBIN -------------------
 ensure_python() {
@@ -103,14 +121,15 @@ ensure_python() {
 # builds an offline wheelhouse ($dest/dist) that users install straight from.
 #
 #   USAGE (maintainer, run once per update):
-#       AUTOSUGGEST_SHARE=/path/in/nobackup/autosuggest-cli \
-#           bash install-linux.sh publish
+#       bash install-linux.sh publish              # -> $HOME/autosuggest-cli
+#       AUTOSUGGEST_SHARE=/some/other/path \
+#           bash install-linux.sh publish          # -> a custom location
 #
-#   then teammates run (per-user install, their own history DB, no git needed):
-#       bash $AUTOSUGGEST_SHARE/install-linux.sh
+#   then teammates run TWO commands (per-user install, no git, no network):
+#       bash <that path>/install-linux.sh
+#       rehash
 publish_share() {
-    local dest="${AUTOSUGGEST_SHARE:-}"
-    [ -n "$dest" ] || die "set AUTOSUGGEST_SHARE=/path/in/nobackup before 'publish'"
+    local dest="${AUTOSUGGEST_SHARE:-$HOME/autosuggest-cli}"
     command -v git >/dev/null 2>&1 || die "git not found on PATH"
 
     echo
@@ -140,10 +159,23 @@ publish_share() {
     # readable + traversable by anyone the maintainer hands the path to
     # (they only need to read from it; parent dirs already allow traverse).
     chmod -R a+rX "$dest" 2>/dev/null || warn "could not chmod a+rX on $dest"
+
+    # Verify a non-group user can actually reach the installer over NFS.
+    local blocked b
+    blocked="$(_unreachable_by_others "$dest/install-linux.sh")"
+    if [ -n "$blocked" ]; then
+        warn "NOT reachable by other users yet — they'd hit 'Permission denied' on:"
+        for b in $blocked; do warn "    $b"; done
+        warn "grant traverse on each dir above, e.g. for your home:  chmod o+x \$HOME"
+    else
+        ok "verified reachable by any user (world-traversable + world-readable)"
+    fi
+
     ok "published to $dest (wheelhouse: $dest/dist)"
     echo
-    say "Tell users to run (per-user install into their own ~/.local, no git):"
+    say "Users install with TWO commands (no copy, no git, no network):"
     say "    bash $dest/install-linux.sh"
+    say "    rehash"
     echo
     exit 0
 }

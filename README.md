@@ -29,13 +29,14 @@ path they gave you — it loads Python for you and installs from a local,
 offline wheelhouse into your own `~/.local`:
 
 ```bash
-bash /proj_nobackup/ee_sandbox/tools/autosuggest-cli/install-linux.sh
+bash <shared-path>/autosuggest-cli/install-linux.sh
 rehash            # tcsh only, so it finds the new commands
 suggest-start     # hooked bash with Python + Perforce + modules
 ```
 
-Re-running it is safe (it clean-reinstalls). Maintainers: to publish or
-refresh that shared copy, see
+`<shared-path>` is whatever your team lead published to (e.g.
+`/home/<lead>/autosuggest-cli`). Re-running it is safe (it clean-reinstalls).
+Maintainers: to publish or refresh that shared copy, see
 [Publishing a shared copy](#publishing-a-shared-copy-maintainers) below.
 
 ### Managed Linux hosts (Exceed TurboX / EDA-CAD farms) — one-shot install
@@ -82,27 +83,39 @@ See [BASH_PORTING_NOTES.txt](docs/design/BASH_PORTING_NOTES.txt) for the full ra
 ### Publishing a shared copy (maintainers)
 
 To let teammates install without git or network access, publish a shared,
-read-only copy once (and again whenever you want to ship an update):
+read-only copy once (and again whenever you want to ship an update). With no
+`AUTOSUGGEST_SHARE` set it publishes to `$HOME/autosuggest-cli`:
 
 ```bash
 module load python/adi/3.12.2
-AUTOSUGGEST_SHARE=/proj_nobackup/ee_sandbox/tools/autosuggest-cli \
-  bash install-linux.sh publish
+bash install-linux.sh publish                       # -> $HOME/autosuggest-cli
+# or a custom location:
+AUTOSUGGEST_SHARE=/some/shared/path bash install-linux.sh publish
 ```
 
-This clones/updates the repo at that path, builds an **offline wheelhouse**
-(`dist/` — the package plus all dependencies), and makes it world-readable
-(`a+rX`). Then hand teammates the one-line install command:
+This clones/updates the repo there, builds an **offline wheelhouse** (`dist/` —
+the package plus all dependencies), makes it world-readable (`a+rX`), and
+**checks that a non-group user can actually reach it** — warning you with the
+exact `chmod` to run if any parent directory isn't traversable.
+
+Because the farm is all NFS, any user on any host can then install with **two
+commands** (no copy, no git, no network) — the `publish` output prints them:
 
 ```bash
-bash /proj_nobackup/ee_sandbox/tools/autosuggest-cli/install-linux.sh
+bash $HOME/autosuggest-cli/install-linux.sh
+rehash
 ```
 
-Users only need read access to that path — no group membership required, as
-long as the parent directories are traversable. Verify reachability with
-`namei -l <path>/install-linux.sh`. Note: the shared copy lives on a
-*nobackup* mount, so re-run `publish` if it's ever purged. Users' own installs
-in `~/.local` are unaffected by purges.
+**Reaching users outside your group:** they only need read + traverse on the
+path, not group membership. If you publish under your home, open just the
+traverse bit so others can pass through to the (world-readable) tool dir:
+
+```bash
+chmod o+x $HOME       # lets others traverse to a known path; does NOT list your home
+```
+
+The `publish` step's reachability check tells you if this is needed. Project
+spaces (`/proj*`) are already world-traversable, so no `chmod` is needed there.
 
 ## Quick Start
 
