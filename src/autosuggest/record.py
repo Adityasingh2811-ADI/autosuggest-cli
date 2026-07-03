@@ -13,9 +13,20 @@ import json
 import socket
 import sys
 
-from autosuggest.daemon import SOCKET_PATH, TCP_PORT
-from autosuggest.paths import IS_WINDOWS
+from autosuggest.paths import IS_WINDOWS, socket_path, token_path, TCP_PORT
 from autosuggest.redact import redact
+
+# Resolved here (not imported from daemon) so this hot per-prompt path avoids
+# importing asyncio and the rest of the daemon module.
+SOCKET_PATH = socket_path()
+
+
+def _read_token() -> str:
+    """Read the daemon auth token (required by the TCP transport)."""
+    try:
+        return token_path().read_text().strip()
+    except OSError:
+        return ""
 
 
 def _send_socket(payload: bytes) -> bool:
@@ -62,7 +73,12 @@ def send_record(command: str, cwd: str, status: int = 0) -> None:
     if not command:
         return
     payload = json.dumps(
-        {"command": command, "cwd": cwd, "exit_status": status}
+        {
+            "command": command,
+            "cwd": cwd,
+            "exit_status": status,
+            "token": _read_token(),
+        }
     ).encode("utf-8")
     if not _send_socket(payload):
         try:
