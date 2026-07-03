@@ -172,19 +172,28 @@ def _spread_timestamps(
 
 
 def _bulk_insert(conn: sqlite3.Connection, entries: list[tuple[str, float]]) -> int:
-    """Insert entries in batches. Returns number of rows inserted."""
+    """Insert entries in batches, skipping exact duplicates. Returns rows inserted.
+
+    Re-running an import (or importing history the daemon already captured)
+    must not create duplicate rows that inflate frecency scores, so each row is
+    inserted only if no identical (command, cwd, timestamp) already exists.
+    """
     inserted = 0
     for i in range(0, len(entries), BATCH_SIZE):
         batch = entries[i : i + BATCH_SIZE]
         rows = [(redact(cmd), "~", ts) for cmd, ts in batch]
-        rows = [r for r in rows if r[0]]
-        conn.executemany(
+        rows = [(cmd, cwd, ts, cmd, cwd, ts) for cmd, cwd, ts in rows if cmd]
+        cur = conn.executemany(
             "INSERT INTO command_history (command, cwd, exit_status, timestamp) "
-            "VALUES (?, ?, 0, ?)",
+            "SELECT ?, ?, 0, ? "
+            "WHERE NOT EXISTS ("
+            "  SELECT 1 FROM command_history "
+            "  WHERE command = ? AND cwd = ? AND timestamp = ?"
+            ")",
             rows,
         )
         conn.commit()
-        inserted += len(rows)
+        inserted += cur.rowcount if cur.rowcount is not None and cur.rowcount >= 0 else len(rows)
     return inserted
 
 
@@ -288,6 +297,12 @@ def run_import() -> None:
     """CLI entry point for suggest-import."""
     args = sys.argv[1:]
 
+    if args and args[0] in ("--version", "-V"):
+        from autosuggest import __version__
+
+        print(f"suggest-import {__version__}")
+        return
+
     if not args:
         # Auto-detect: import all available history files
         total = 0
@@ -336,7 +351,6 @@ def run_import() -> None:
         else:
             print(f"[import] unknown argument: {args[i]}")
             return
-        i  # already advanced above
 
 
 if __name__ == "__main__":
