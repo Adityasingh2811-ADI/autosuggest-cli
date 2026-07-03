@@ -4,6 +4,7 @@ commands into the autosuggest SQLite database.
 """
 
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -14,10 +15,15 @@ from autosuggest.redact import redact
 
 BASH_HISTORY_PATH = Path.home() / ".bash_history"
 ZSH_HISTORY_PATH = Path.home() / ".zsh_history"
+# tcsh/csh default history file (the login shell on managed ADI hosts).
+TCSH_HISTORY_PATH = Path.home() / ".history"
 PS_HISTORY_PATH = (
     Path.home()
     / "AppData/Roaming/Microsoft/Windows/PowerShell/PSReadLine/ConsoleHost_history.txt"
 )
+
+# A tcsh timestamp marker line: '#+<epoch>' (time-stamped savehist) or '#<epoch>'.
+_TCSH_TS_RE = re.compile(r"^[#+]+(\d{9,})$")
 
 BATCH_SIZE = 1000
 
@@ -73,6 +79,39 @@ def _parse_zsh_history(path: Path) -> list[tuple[str, float | None]]:
         cmd = line.strip()
         if len(cmd) >= 2:
             entries.append((cmd, ts))
+        i += 1
+
+    return entries
+
+
+def _parse_tcsh_history(path: Path) -> list[tuple[str, float | None]]:
+    """Parse tcsh/csh history (~/.history). Returns list of (command, ts_or_None).
+
+    tcsh optionally writes a ``#+<epoch>`` marker line before each command when
+    time-stamped ``savehist`` is enabled; plain history has bare command lines.
+    """
+    entries: list[tuple[str, float | None]] = []
+    if not path.exists():
+        return entries
+
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    pending_ts: float | None = None
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = _TCSH_TS_RE.match(line.strip())
+        if m:
+            pending_ts = float(m.group(1))
+            i += 1
+            continue
+        # Join backslash-continued multi-line commands.
+        while line.endswith("\\") and i + 1 < len(lines):
+            i += 1
+            line = line[:-1] + "\n" + lines[i]
+        cmd = line.strip()
+        if len(cmd) >= 2:
+            entries.append((cmd, pending_ts))
+            pending_ts = None
         i += 1
 
     return entries
@@ -197,6 +236,30 @@ def import_zsh(path: Path | None = None) -> int:
         conn.close()
 
 
+def import_tcsh(path: Path | None = None) -> int:
+    """Import tcsh/csh history. Returns number of commands imported."""
+    path = path or TCSH_HISTORY_PATH
+    if not path.exists():
+        print(f"[import] tcsh history not found: {path}")
+        return 0
+
+    entries = _parse_tcsh_history(path)
+    if not entries:
+        print(f"[import] no commands found in {path}")
+        return 0
+
+    mtime = path.stat().st_mtime
+    timestamped = _spread_timestamps(entries, mtime)
+
+    conn = init_db()
+    try:
+        count = _bulk_insert(conn, timestamped)
+        print(f"[import] imported {count} commands from {path}")
+        return count
+    finally:
+        conn.close()
+
+
 def import_powershell(path: Path | None = None) -> int:
     """Import PowerShell history. Returns number of commands imported."""
     path = path or PS_HISTORY_PATH
@@ -232,12 +295,15 @@ def run_import() -> None:
             total += import_bash()
         if ZSH_HISTORY_PATH.exists():
             total += import_zsh()
+        if TCSH_HISTORY_PATH.exists():
+            total += import_tcsh()
         if PS_HISTORY_PATH.exists():
             total += import_powershell()
         if total == 0:
             print("[import] no history files found to import")
             print(f"  looked for: {BASH_HISTORY_PATH}")
             print(f"             {ZSH_HISTORY_PATH}")
+            print(f"             {TCSH_HISTORY_PATH}")
             print(f"             {PS_HISTORY_PATH}")
         else:
             print(f"[import] total: {total} commands imported")
@@ -251,6 +317,9 @@ def run_import() -> None:
         elif args[i] == "--zsh" and i + 1 < len(args):
             import_zsh(Path(os.path.expanduser(args[i + 1])))
             i += 2
+        elif args[i] == "--tcsh" and i + 1 < len(args):
+            import_tcsh(Path(os.path.expanduser(args[i + 1])))
+            i += 2
         elif args[i] == "--powershell" and i + 1 < len(args):
             import_powershell(Path(os.path.expanduser(args[i + 1])))
             i += 2
@@ -260,6 +329,7 @@ def run_import() -> None:
             print("  No arguments:  auto-detect and import all found history files")
             print("  --bash PATH    import from a bash history file")
             print("  --zsh PATH     import from a zsh history file")
+            print("  --tcsh PATH    import from a tcsh/csh history file")
             print("  --powershell PATH  import from a PowerShell history file")
             print("  --help         show this message")
             return
