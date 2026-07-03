@@ -8,9 +8,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from autosuggest.paths import db_path
-
-DB_PATH = db_path()
+from autosuggest.paths import db_path as _resolve_db_path, journal_mode_for
 
 # Decay half-life in seconds (1 hour).
 # After 1 hour a command's recency contribution halves.
@@ -82,9 +80,13 @@ CREATE INDEX IF NOT EXISTS idx_sequence
 
 
 class PredictionEngine:
-    def __init__(self, db_path: str | Path = DB_PATH) -> None:
+    def __init__(self, db_path: str | Path | None = None) -> None:
+        # Resolve lazily so importing this module never touches (or creates)
+        # the real user database — important for tests and tooling.
+        if db_path is None:
+            db_path = _resolve_db_path()
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
-        self._conn.execute("PRAGMA journal_mode=WAL;")
+        self._conn.execute(f"PRAGMA journal_mode={journal_mode_for(Path(db_path))};")
         self._conn.executescript(_SCHEMA)
         self._conn.execute("PRAGMA query_only=ON;")
 
