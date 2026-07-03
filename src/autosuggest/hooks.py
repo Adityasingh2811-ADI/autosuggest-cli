@@ -24,6 +24,8 @@ _autosuggest_last_hist=""
 
 # Resolve socket path (XDG on Linux, TCP fallback on Windows/WSL)
 _autosuggest_sock="${XDG_RUNTIME_DIR:-/tmp/autosuggest-$(id -u)}/autosuggest.sock"
+# Daemon start errors go here (not /dev/null) so failures are diagnosable.
+_autosuggest_log="${XDG_RUNTIME_DIR:-/tmp/autosuggest-$(id -u)}/daemon.log"
 
 # Resolve a python interpreter once per session
 _autosuggest_python=""
@@ -48,10 +50,10 @@ _autosuggest_ensure_daemon() {
 
     # Not running — start it detached
     if command -v suggest-daemon &>/dev/null; then
-        suggest-daemon start </dev/null &>/dev/null &
+        suggest-daemon start </dev/null >>"$_autosuggest_log" 2>&1 &
         disown
     elif [ -n "$_autosuggest_python" ]; then
-        "$_autosuggest_python" -m autosuggest.daemon start </dev/null &>/dev/null &
+        "$_autosuggest_python" -m autosuggest.daemon start </dev/null >>"$_autosuggest_log" 2>&1 &
         disown
     fi
 }
@@ -62,7 +64,8 @@ _autosuggest_send() {
     local payload="$1"
     if [[ -S "$_autosuggest_sock" ]]; then
         if command -v socat &>/dev/null; then
-            printf '%s' "$payload" | socat - UNIX-CONNECT:"$_autosuggest_sock" 2>/dev/null &
+            # -T2: bail out after 2s of inactivity so a broken pipe can't leak.
+            printf '%s' "$payload" | socat -T2 - UNIX-CONNECT:"$_autosuggest_sock" 2>/dev/null &
             disown 2>/dev/null
             return
         fi
@@ -220,6 +223,7 @@ ZSH_HOOK = r'''
 # Set AUTOSUGGEST_NO_NEXTSTEPS=1 to silence next-step output.
 
 _autosuggest_sock="${XDG_RUNTIME_DIR:-/tmp/autosuggest-$(id -u)}/autosuggest.sock"
+_autosuggest_log="${XDG_RUNTIME_DIR:-/tmp/autosuggest-$(id -u)}/daemon.log"
 
 _autosuggest_python=""
 if command -v python3 &>/dev/null; then
@@ -232,11 +236,20 @@ _autosuggest_ensure_daemon() {
     if [[ -S "$_autosuggest_sock" ]]; then
         return
     fi
-    (echo "" > /dev/tcp/127.0.0.1/19526) 2>/dev/null && return
+    # zsh has no /dev/tcp; probe the TCP fallback via python when available.
+    if [[ -n "$_autosuggest_python" ]] && "$_autosuggest_python" -c "
+import socket,sys
+try:
+    s=socket.socket();s.settimeout(0.1);s.connect(('127.0.0.1',19526));s.close()
+except Exception:
+    sys.exit(1)
+" 2>/dev/null; then
+        return
+    fi
     if command -v suggest-daemon &>/dev/null; then
-        suggest-daemon start </dev/null &>/dev/null &!
+        suggest-daemon start </dev/null >>"$_autosuggest_log" 2>&1 &!
     elif [[ -n "$_autosuggest_python" ]]; then
-        "$_autosuggest_python" -m autosuggest.daemon start </dev/null &>/dev/null &!
+        "$_autosuggest_python" -m autosuggest.daemon start </dev/null >>"$_autosuggest_log" 2>&1 &!
     fi
 }
 
@@ -244,7 +257,8 @@ _autosuggest_send() {
     local payload="$1"
     if [[ -S "$_autosuggest_sock" ]]; then
         if command -v socat &>/dev/null; then
-            printf '%s' "$payload" | socat - UNIX-CONNECT:"$_autosuggest_sock" 2>/dev/null &!
+            # -T2: bail out after 2s of inactivity so a broken pipe can't leak.
+            printf '%s' "$payload" | socat -T2 - UNIX-CONNECT:"$_autosuggest_sock" 2>/dev/null &!
             return
         fi
         if [[ -n "$_autosuggest_python" ]]; then
@@ -259,11 +273,7 @@ except Exception:
             return
         fi
     fi
-    if (exec 3<>/dev/tcp/127.0.0.1/19526) 2>/dev/null; then
-        printf '%s' "$payload" >&3 2>/dev/null
-        exec 3>&- 2>/dev/null
-        return
-    fi
+    # zsh lacks /dev/tcp; use a python one-shot for the TCP fallback.
     if [[ -n "$_autosuggest_python" ]]; then
         "$_autosuggest_python" -c "
 import socket,sys
@@ -483,7 +493,12 @@ function global:_AutosuggestSendTelemetry {
     $cmd = $cmd -replace '\\', '\\' -replace '"', '\"'
     $cwd = $cwd -replace '\\', '\\' -replace '"', '\"'
 
-    $payload = "{`"command`":`"$cmd`",`"cwd`":`"$cwd`",`"exit_status`":$exitStatus}"
+    # Auth token gates the local TCP listener so other processes can't inject.
+    $tokenPath = Join-Path $env:USERPROFILE ".cli_autosuggest.token"
+    $token = ""
+    if (Test-Path $tokenPath) { $token = (Get-Content -Raw $tokenPath).Trim() }
+
+    $payload = "{`"command`":`"$cmd`",`"cwd`":`"$cwd`",`"exit_status`":$exitStatus,`"token`":`"$token`"}"
 
     $null = Start-Job -ScriptBlock {
         param($p)
@@ -868,10 +883,16 @@ TCSH_HOOK = r'''
 #   * Inline ghost text ........... no  (tcsh limitation)
 #   * Frecency Tab completion ..... no  (tcsh limitation)
 #
+# PERFORMANCE: with next-step output enabled the recorder runs synchronously
+# before each prompt (it must print above the prompt). On slow NFS-home hosts
+# that Python start-up can add latency. Set AUTOSUGGEST_NO_NEXTSTEPS=1 and the
+# per-prompt recorder is backgrounded instead, so the prompt never blocks:
+#     setenv AUTOSUGGEST_NO_NEXTSTEPS 1
+#
 # Load it with tcsh-native BACKTICKS — csh/tcsh CANNOT parse $(...):
 #     eval `suggest-hook tcsh`
 # Persist it by adding that line to ~/.tcshrc (or ~/.cshrc.user on managed
-# hosts). Silence next-step output with:  setenv AUTOSUGGEST_NO_NEXTSTEPS 1
+# hosts).
 
 # Put pip --user scripts on PATH so suggest-* resolve, then refresh the hash.
 if ( -d ~/.local/bin ) then
@@ -894,23 +915,28 @@ endif
 if ( "$_AUTOSUGGEST_PY" != "" ) then
     if ( $?XDG_RUNTIME_DIR ) then
         set _as_sock = "$XDG_RUNTIME_DIR/autosuggest.sock"
+        set _as_log = "$XDG_RUNTIME_DIR/daemon.log"
     else
         set _as_sock = "/tmp/autosuggest-`id -u`/autosuggest.sock"
+        set _as_log = "/tmp/autosuggest-`id -u`/daemon.log"
     endif
     if ( ! -e "$_as_sock" ) then
+        # Log start errors (port in use, etc.) instead of discarding them.
         if ( -X suggest-daemon ) then
-            ( suggest-daemon start >& /dev/null & )
+            ( suggest-daemon start >>& "$_as_log" & )
         else
-            ( $_AUTOSUGGEST_PY -m autosuggest.daemon start >& /dev/null & )
+            ( $_AUTOSUGGEST_PY -m autosuggest.daemon start >>& "$_as_log" & )
         endif
     endif
     unset _as_sock
+    unset _as_log
 endif
 
 # precmd runs before every prompt: record the command just finished and show
 # next-step suggestions. $status MUST be captured on the very first statement
-# so it reflects the command that just ran.
-alias precmd 'set _as_st = $status; set _as_cmd = "`history -h 1`"; if ( "$_AUTOSUGGEST_PY" != "" ) $_AUTOSUGGEST_PY -m autosuggest.tcsh_precmd "$_as_cmd:q" "$cwd" $_as_st'
+# so it reflects the command that just ran. When next-steps are disabled the
+# recorder is backgrounded so the prompt returns immediately (non-blocking).
+alias precmd 'set _as_st = $status; set _as_cmd = "`history -h 1`"; if ( "$_AUTOSUGGEST_PY" != "" && $?AUTOSUGGEST_NO_NEXTSTEPS ) ( $_AUTOSUGGEST_PY -m autosuggest.tcsh_precmd "$_as_cmd:q" "$cwd" $_as_st >& /dev/null & ); if ( "$_AUTOSUGGEST_PY" != "" && ! $?AUTOSUGGEST_NO_NEXTSTEPS ) $_AUTOSUGGEST_PY -m autosuggest.tcsh_precmd "$_as_cmd:q" "$cwd" $_as_st'
 '''
 
 BASH_SOURCE_LINE = 'eval "$(suggest-hook bash)"'
