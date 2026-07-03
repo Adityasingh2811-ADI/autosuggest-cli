@@ -10,7 +10,7 @@ import sys
 import time
 from pathlib import Path
 
-from autosuggest.paths import db_path
+from autosuggest.paths import db_path, apply_journal_mode
 
 DB_PATH = db_path()
 
@@ -20,7 +20,8 @@ def _connect() -> sqlite3.Connection:
         print("No history database found. Run some commands first!")
         sys.exit(1)
     conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=5000;")
+    apply_journal_mode(conn, DB_PATH)
     conn.execute("PRAGMA query_only=ON;")
     return conn
 

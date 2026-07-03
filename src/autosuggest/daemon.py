@@ -20,7 +20,7 @@ from pathlib import Path
 
 from autosuggest.paths import db_path, pid_path, socket_path, token_path
 from autosuggest.redact import redact
-from autosuggest.paths import IS_WINDOWS, journal_mode_for, TCP_HOST, TCP_PORT
+from autosuggest.paths import IS_WINDOWS, apply_journal_mode, TCP_HOST, TCP_PORT
 from autosuggest.engine import _SCHEMA
 
 DB_PATH = db_path()
@@ -30,10 +30,13 @@ SOCKET_PATH = socket_path()
 
 def init_db() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH), isolation_level="DEFERRED", check_same_thread=False)
-    # WAL is unsafe on network filesystems (NFS/CIFS); fall back where needed.
-    conn.execute(f"PRAGMA journal_mode={journal_mode_for(DB_PATH)};")
-    conn.execute("PRAGMA synchronous=NORMAL;")
+    # Set the busy timeout FIRST so the journal-mode switch below can wait for
+    # a lock instead of failing immediately when another connection is open.
     conn.execute("PRAGMA busy_timeout=5000;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+    # WAL is unsafe on network filesystems (NFS/CIFS); fall back where needed.
+    # Tolerant: if the daemon already holds the DB, keep the current mode.
+    apply_journal_mode(conn, DB_PATH)
     conn.executescript(_SCHEMA)
     return conn
 

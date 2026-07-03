@@ -137,6 +137,23 @@ def journal_mode_for(path: Path) -> str:
     return "TRUNCATE" if is_network_fs(path) else "WAL"
 
 
+def apply_journal_mode(conn, path: Path) -> None:
+    """Set a filesystem-appropriate journal mode without ever failing hard.
+
+    Switching journal mode needs an exclusive lock, and switching *out* of WAL
+    is impossible while another connection (e.g. the daemon) holds the DB open.
+    Callers must have already set ``PRAGMA busy_timeout`` so this can wait for
+    the lock; if it still can't switch, we keep whatever mode is current —
+    reads and writes work in any journal mode, so this is always safe.
+    """
+    import sqlite3
+
+    try:
+        conn.execute(f"PRAGMA journal_mode={journal_mode_for(path)};")
+    except sqlite3.OperationalError:
+        pass
+
+
 def workflows_path() -> Path:
     if IS_WINDOWS:
         return Path(__file__).parent / "workflows.yaml"

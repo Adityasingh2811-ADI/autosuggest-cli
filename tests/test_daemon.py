@@ -3,10 +3,11 @@
 import asyncio
 import json
 import sqlite3
+from pathlib import Path
 
 import pytest
 
-from autosuggest import daemon
+from autosuggest import daemon, paths
 
 
 class _FakeReader:
@@ -137,3 +138,29 @@ def test_prune_caps_row_count(monkeypatch):
         "SELECT command FROM command_history ORDER BY timestamp DESC"
     ).fetchall()
     assert kept[0][0] == "cmd9"
+
+
+def test_apply_journal_mode_sets_requested_mode(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "journal_mode_for", lambda _p: "TRUNCATE")
+    dbfile = tmp_path / "h.db"
+    conn = sqlite3.connect(str(dbfile))
+    conn.execute("PRAGMA busy_timeout=1000;")
+    paths.apply_journal_mode(conn, dbfile)
+    mode = conn.execute("PRAGMA journal_mode;").fetchone()[0]
+    assert mode.lower() == "truncate"
+    conn.close()
+
+
+def test_apply_journal_mode_tolerates_locked_switch(monkeypatch):
+    # Regression: switching a WAL DB to TRUNCATE while the daemon holds it open
+    # raises "database is locked". apply_journal_mode must swallow that and keep
+    # the current mode rather than crashing suggest-import.
+    monkeypatch.setattr(paths, "journal_mode_for", lambda _p: "TRUNCATE")
+
+    class _LockedConn:
+        def execute(self, _sql):
+            raise sqlite3.OperationalError("database is locked")
+
+    # Must not raise.
+    paths.apply_journal_mode(_LockedConn(), Path("/nfs/home/history.db"))
+
