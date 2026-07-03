@@ -100,6 +100,17 @@
         bash /home/asingh56/autosuggest-cli/install-linux.sh
 
 
+  Prompt feels slow (managed NFS-home hosts)?
+      The after-command "Next steps:" list runs a short Python start each
+      prompt. Turn it off and recording is backgrounded (prompt never waits):
+
+        setenv AUTOSUGGEST_NO_NEXTSTEPS 1     (tcsh/csh)
+        export AUTOSUGGEST_NO_NEXTSTEPS=1     (bash/zsh)
+
+      Note: in native tcsh you only get recording + next-steps — inline grey
+      suggestions and Tab completion need bash/zsh or the `suggest` window.
+
+
 ------------------------------------------------------------------------------
   TURN IT OFF
 ------------------------------------------------------------------------------

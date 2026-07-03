@@ -409,11 +409,23 @@ TABLE OF CONTENTS
        add them there to run automatically at login.
        => You must re-apply them every new session.
 
-    3. THE HOOK IS A BASH/ZSH FEATURE, NOT CSH
-       The shell hook is implemented for bash, zsh, and PowerShell. There
-       is no csh/tcsh hook (csh lacks PROMPT_COMMAND, `bind -x`, and the
-       readline buffer variables the hook relies on).
-       => You must switch into bash to actually use the suggestions.
+    3. THE RICH HOOK IS A BASH/ZSH FEATURE; TCSH IS TELEMETRY-ONLY
+       Inline ghost text, accept-suggestion keys, and frecency Tab
+       completion require a programmable line editor (readline/zle), which
+       tcsh/csh simply do not have. There IS a tcsh hook, but by design it
+       only:
+         - records your commands (telemetry), and
+         - prints a short "Next steps:" list after each command.
+       It cannot show ghost text or Tab-complete from history — that is a
+       hard tcsh limitation, not a missing feature.
+       => For the full experience, use the auto-launched bash (the
+          installer sets this up) or run `suggest` (the REPL works in ANY
+          shell, tcsh included).
+
+       PERFORMANCE (slow NFS-home hosts): the next-steps print runs a short
+       Python start-up before each prompt. If that feels laggy, silence it
+       and the recorder is backgrounded so the prompt never blocks:
+             setenv AUTOSUGGEST_NO_NEXTSTEPS 1
 
   PER-SESSION BOOTSTRAP (RUN AT THE START OF EVERY SESSION)
   --------------------------------------------------------
