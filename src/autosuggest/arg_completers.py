@@ -118,6 +118,67 @@ def _make_targets(cwd: str) -> list[str]:
     return _cached("make-targets", cwd, _parse)
 
 
+# --- Module completers ---
+
+_MODULE_AVAIL_TIMEOUT = 3.0  # module avail can be slow on NFS
+
+
+def _module_names(cwd: str) -> list[str]:
+    """Parse available module names from ``module avail``."""
+    def _resolve():
+        try:
+            result = subprocess.run(
+                ["module", "avail"],
+                capture_output=True,
+                text=True,
+                timeout=_MODULE_AVAIL_TIMEOUT,
+                cwd=cwd,
+            )
+            output = result.stderr + result.stdout
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            return []
+        modules = []
+        for line in output.splitlines():
+            line = line.strip()
+            if not line or line.startswith("-") or line.endswith(":"):
+                continue
+            for token in line.split():
+                token = token.strip("()")
+                if "/" in token and not token.startswith("/"):
+                    modules.append(token)
+        return modules
+
+    return _cached("module-avail", cwd, _resolve)
+
+
+def _module_loaded(cwd: str) -> list[str]:
+    """Parse currently loaded module names from ``module list``."""
+    def _resolve():
+        try:
+            result = subprocess.run(
+                ["module", "list"],
+                capture_output=True,
+                text=True,
+                timeout=_MODULE_AVAIL_TIMEOUT,
+                cwd=cwd,
+            )
+            output = result.stderr + result.stdout
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            return []
+        modules = []
+        for line in output.splitlines():
+            line = line.strip()
+            if not line or line.startswith("Currently") or line.startswith("No"):
+                continue
+            for token in line.split():
+                cleaned = re.sub(r'^\d+\)', '', token).strip()
+                if cleaned and "/" in cleaned:
+                    modules.append(cleaned)
+        return modules
+
+    return _cached("module-loaded", cwd, _resolve)
+
+
 # --- Pip completers ---
 
 def _pip_packages(cwd: str) -> list[str]:
@@ -168,6 +229,13 @@ _COMPLETERS: list[tuple[str, str, callable]] = [
     ("docker restart ", "docker", _docker_containers),
     # Make completers
     ("make ", "make", _make_targets),
+    # Module completers
+    ("module load ", "module", _module_names),
+    ("module add ", "module", _module_names),
+    ("module unload ", "module", _module_loaded),
+    ("module rm ", "module", _module_loaded),
+    ("module switch ", "module", _module_names),
+    ("module swap ", "module", _module_names),
     # Pip completers (uses python -m pip internally)
     ("pip install ", "pip", _pip_packages),
     ("pip uninstall ", "pip", _pip_packages),
