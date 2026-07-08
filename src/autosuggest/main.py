@@ -198,7 +198,10 @@ def main() -> None:
     print("autosuggest-cli | Ctrl+D to exit | Tab/Shift+Tab: cycle | ->: accept ghost")
     print("  Type a number [1-3] after suggestions to accept a next step.\n")
     if runner.persistent:
-        print("  [persistent shell: module/env changes carry across commands]\n")
+        if runner.backend == "tcsh":
+            print("  [native tcsh backend: pinit, source .csh, module load all work natively]\n")
+        else:
+            print("  [persistent bash shell: module/env changes carry across commands]\n")
 
     last_suggestions: list = []
 
