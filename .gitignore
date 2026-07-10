@@ -15,3 +15,7 @@ build/
 scripts/
 DEMO_SCRIPT.txt
 PPT_OUTLINE.md
+
+# local tooling
+.chipagents/
+.tmp/
