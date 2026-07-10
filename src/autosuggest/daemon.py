@@ -74,6 +74,31 @@ def _prune_db(conn: sqlite3.Connection) -> int:
     return deleted
 
 
+def dedupe_history(conn: sqlite3.Connection) -> int:
+    """Collapse exact-duplicate rows and return how many were removed.
+
+    Pre-dedup versions of ``suggest-import`` inserted without a uniqueness
+    guard, so re-running it multiplied identical (command, cwd, timestamp)
+    rows and inflated frecency scores. This keeps one row per
+    (command, cwd, timestamp): distinct occurrences within a single import
+    (which get spread-out timestamps) are preserved, and live-recorded rows
+    (unique high-resolution timestamps) are never touched. Idempotent and
+    safe to run on every startup — a clean DB yields zero deletions.
+    """
+    removed = 0
+    try:
+        cur = conn.execute(
+            "DELETE FROM command_history WHERE id NOT IN "
+            "(SELECT MIN(id) FROM command_history "
+            " GROUP BY command, cwd, timestamp)"
+        )
+        removed = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        conn.commit()
+    except sqlite3.Error as e:
+        print(f"[daemon] dedupe failed: {e}", file=sys.stderr)
+    return removed
+
+
 def _load_or_create_token() -> str:
     """Return the per-user auth token, creating it privately if absent.
 
@@ -138,8 +163,9 @@ def _insert_row(db: sqlite3.Connection, payload: dict) -> None:
     if not command:
         return
     db.execute(
-        "INSERT INTO command_history (command, cwd, exit_status) VALUES (?, ?, ?)",
-        (command, payload["cwd"], payload.get("exit_status", 0)),
+        "INSERT INTO command_history (command, cwd, exit_status, timestamp) "
+        "VALUES (?, ?, ?, ?)",
+        (command, payload["cwd"], payload.get("exit_status", 0), time.time()),
     )
     db.commit()
 
@@ -172,6 +198,9 @@ def _reap_stale_socket() -> None:
 
 async def main() -> None:
     db = init_db()
+    removed = dedupe_history(db)
+    if removed:
+        print(f"[daemon] removed {removed} duplicate rows from earlier imports")
     _prune_db(db)
     token = _load_or_create_token()
 
@@ -275,15 +304,58 @@ def is_daemon_running() -> tuple[bool, int | None]:
     return alive, pid if alive else None
 
 
-def _cmd_start() -> None:
-    """Start the daemon (default subcommand)."""
+def _redirect_stdio_to_log() -> None:
+    """Point stdout/stderr at the daemon log so a detached daemon's output and
+    errors are captured instead of lost to a closed terminal."""
+    from autosuggest.paths import runtime_dir
+
+    try:
+        log = runtime_dir() / "daemon.log"
+        fd = os.open(str(log), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        os.dup2(fd, 1)
+        os.dup2(fd, 2)
+        devnull = os.open(os.devnull, os.O_RDONLY)
+        os.dup2(devnull, 0)
+    except OSError:
+        pass
+
+
+def _cmd_start(foreground: bool = False) -> None:
+    """Start the daemon (default subcommand).
+
+    By default this detaches into the background (double-fork on POSIX) so a
+    manual ``suggest-daemon start`` returns immediately instead of blocking the
+    shell. Pass ``foreground=True`` (``--foreground``) to run in the current
+    process, e.g. under a supervisor.
+    """
     running, pid = is_daemon_running()
     if running:
         print(f"[daemon] already running (PID {pid})")
         return
 
+    if not foreground and not IS_WINDOWS:
+        # Double-fork so the daemon outlives the launching shell and does not
+        # keep it blocked. The original process returns to the caller.
+        try:
+            pid1 = os.fork()
+        except OSError:
+            pid1 = -1  # fork unavailable — fall back to foreground
+        if pid1 > 0:
+            return  # parent: hand control straight back to the shell
+        if pid1 == 0:
+            os.setsid()
+            try:
+                if os.fork() > 0:
+                    os._exit(0)  # first child exits; grandchild is the daemon
+            except OSError:
+                pass
+            _redirect_stdio_to_log()
+        # pid1 == -1 falls through and runs in the foreground.
+
     if not _acquire_singleton_lock():
-        print("[daemon] another instance is starting")
+        print("[daemon] another instance is starting", file=sys.stderr)
+        if not foreground and not IS_WINDOWS:
+            os._exit(0)
         return
 
     try:
@@ -336,7 +408,8 @@ def run_daemon() -> None:
     cmd = args[0] if args else "start"
 
     if cmd == "start":
-        _cmd_start()
+        foreground = "--foreground" in args or "-f" in args
+        _cmd_start(foreground=foreground)
     elif cmd == "stop":
         _cmd_stop()
     elif cmd == "status":
@@ -346,9 +419,10 @@ def run_daemon() -> None:
 
         print(f"suggest-daemon {__version__}")
     elif cmd in ("--help", "-h"):
-        print("Usage: suggest-daemon [start|stop|status]")
+        print("Usage: suggest-daemon [start [--foreground]|stop|status]")
         print()
-        print("  start   start the telemetry daemon (default)")
+        print("  start   start the telemetry daemon (default; detaches)")
+        print("    --foreground, -f   run in the foreground (do not detach)")
         print("  stop    stop the running daemon")
         print("  status  check if the daemon is running")
     else:

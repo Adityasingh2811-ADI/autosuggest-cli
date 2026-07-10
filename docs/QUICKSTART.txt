@@ -82,6 +82,16 @@
   IF SOMETHING DOESN'T WORK
 ------------------------------------------------------------------------------
 
+  Not sure it's working? Check everything at once:
+
+        suggest-selftest       <- PASS/FAIL health report + live/imported counts
+        suggest-daemon status  <- is the background recorder running?
+
+      In suggest-selftest, the "history rows" line shows a "live" count that
+      climbs as you use commands — that's proof recording works. (Even if the
+      daemon is down, commands are still recorded via a direct fallback, so
+      nothing is ever lost.)
+
   "suggest: Command not found"  /  "suggest-start: Command not found"
       Your shell hasn't picked up the new commands yet. Fix it:
 
@@ -94,6 +104,24 @@
       You pasted a bash-style line containing  $(...)  into tcsh. Don't —
       use the installer above, or `suggest-start` / `suggest`. tcsh cannot
       parse  $(...) .
+
+  A project/EDA command isn't found in the hooked bash (pinit, adv env, etc.)
+      Some managed-host commands are tcsh ALIASES or csh scripts you `source`
+      (e.g. pinit -> "source .../gpms/pinit"). They set up your environment in
+      csh, so they CANNOT run in the hooked bash or the `suggest` window: bash
+      can't parse csh, and `source` only affects the shell it runs in.
+
+      Do this — set up the environment in tcsh FIRST, then enter the hook.
+      Exported (setenv) variables are inherited by the bash it launches:
+
+        pinit ee_sandbox      (in tcsh: sets up your PI/Perforce environment)
+        suggest-start         (bash inherits that environment)
+
+      Mostly doing PI/EDA work? Stay in tcsh by default and pull up
+      suggestions on demand instead of auto-dropping into bash:
+
+        touch ~/.no_autosuggest   (stop the auto-launch; rm to re-enable)
+        suggest                   (ghost-text + Tab, works in ANY shell)
 
   Re-run the installer any time to repair things:
 

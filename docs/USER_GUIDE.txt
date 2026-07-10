@@ -20,6 +20,25 @@ WHAT'S NEW (v0.6.0)
     (~/.history), and the installer raises the managed tcsh history cap
     (40 -> 10000) so it actually accumulates over time.
 
+  Reliability (managed EDA/NFS hosts):
+  - Records reliably on NFS home directories and on hosts with an older
+    system SQLite — recording no longer silently drops commands.
+  - Never loses a command: if the background daemon is down, telemetry falls
+    back to a direct database write, and the daemon auto-restarts on your next
+    prompt (a stale socket no longer blocks the restart).
+  - `suggest-import` de-duplicates, so re-running it (or upgrading) can't
+    inflate your suggestion scores; existing duplicates are cleaned up too.
+
+  New commands & features:
+  - `suggest-selftest` — one command that prints a PASS/FAIL health report
+    plus your live/imported row counts. Best first check after install.
+  - EDA/CAD next-steps: Vivado, Perforce (p4), simulation (xsim/vsim), and
+    `module load` flows now suggest the usual follow-up commands.
+  - Expanded secret redaction (sshpass, --password-stdin, ssh-keygen
+    passphrases) so credentials never reach the database.
+  - `--version` on the suggest-* commands; set AUTOSUGGEST_NO_NEXTSTEPS=1 for
+    a fully non-blocking prompt on slow hosts.
+
 ================================================================================
 TABLE OF CONTENTS
 ================================================================================
@@ -158,6 +177,7 @@ TABLE OF CONTENTS
   -------------------
   Run these commands — each should produce output without error:
 
+    suggest-selftest                   # PASS/FAIL health report (best first check)
     suggest --help
     suggest-daemon status
     suggest-import --help
@@ -174,6 +194,7 @@ TABLE OF CONTENTS
     suggest-hook         Shell integration hooks
     suggest-nextsteps    Next-step suggestion CLI
     suggest-stats        Usage statistics
+    suggest-selftest     Non-interactive health check (PASS/FAIL report)
 
 ================================================================================
 4. QUICK START (5 MINUTES)

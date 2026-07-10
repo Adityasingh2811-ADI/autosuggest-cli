@@ -199,7 +199,7 @@ def main() -> None:
     print("  Type a number [1-3] after suggestions to accept a next step.\n")
     if runner.persistent:
         if runner.backend == "tcsh":
-            print(f"  [native tcsh backend: pinit, source .csh, module load all work natively]\n")
+            print("  [native tcsh backend: pinit, source .csh, module load all work natively]\n")
         else:
             print("  [persistent bash shell: module/env changes carry across commands]\n")
 

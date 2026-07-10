@@ -275,7 +275,18 @@ command -v suggest-hook >/dev/null 2>&1 \
     && ok "suggest-hook found at $(command -v suggest-hook)" \
     || warn "suggest-hook not on PATH yet (the dotfiles below will fix that at login)"
 
-# ---- 3a. seed suggestions from existing history (one-time) -----------------
+# ---- 3a. stop any daemon left over from a previous version -----------------
+# A long-lived daemon started by an earlier install keeps running the OLD code
+# against the freshly installed package (and holds the DB open, which can block
+# the import below). Stop it now; the shell hook relaunches a fresh one with the
+# new code on the next prompt.
+if command -v suggest-daemon >/dev/null 2>&1; then
+    suggest-daemon stop >/dev/null 2>&1 \
+        && ok "stopped previous daemon (a fresh one starts on next shell)" \
+        || say "no previous daemon was running"
+fi
+
+# ---- 3b. seed suggestions from existing history (one-time) -----------------
 IMPORT_SENTINEL="$HOME/.cli_autosuggest.imported"
 if [ "${NO_IMPORT:-0}" != "1" ] && [ ! -f "$IMPORT_SENTINEL" ] \
    && command -v suggest-import >/dev/null 2>&1; then

@@ -164,3 +164,90 @@ def test_apply_journal_mode_tolerates_locked_switch(monkeypatch):
     # Must not raise.
     paths.apply_journal_mode(_LockedConn(), Path("/nfs/home/history.db"))
 
+
+def test_dedupe_collapses_repeated_imports():
+    # Simulate a pre-dedup DB: the same import ran 3x, so every
+    # (command, cwd, timestamp) triple appears 3 times.
+    db = _mem_db()
+    rows = [("git status", "~", 100.0), ("git status", "~", 101.0), ("make", "~", 102.0)]
+    for _ in range(3):
+        db.executemany(
+            "INSERT INTO command_history (command, cwd, exit_status, timestamp) "
+            "VALUES (?, ?, 0, ?)",
+            rows,
+        )
+    db.commit()
+    assert db.execute("SELECT COUNT(*) FROM command_history").fetchone()[0] == 9
+
+    removed = daemon.dedupe_history(db)
+
+    assert removed == 6  # 3 unique triples kept, 6 duplicates removed
+    remaining = db.execute("SELECT COUNT(*) FROM command_history").fetchone()[0]
+    assert remaining == 3
+
+
+def test_dedupe_preserves_within_import_frequency_and_live_rows():
+    db = _mem_db()
+    # Two distinct occurrences of the same command in one import (different
+    # spread timestamps) — legitimate frequency, must be kept.
+    db.executemany(
+        "INSERT INTO command_history (command, cwd, exit_status, timestamp) VALUES (?, ?, 0, ?)",
+        [("ls", "~", 1.0), ("ls", "~", 2.0),
+         # a live-recorded row with a real cwd + unique timestamp
+         ("ls", "/home/u/proj", 12345.678)],
+    )
+    db.commit()
+
+    removed = daemon.dedupe_history(db)
+
+    assert removed == 0
+    assert db.execute("SELECT COUNT(*) FROM command_history").fetchone()[0] == 3
+
+
+def test_insert_row_does_not_depend_on_timestamp_default():
+    # Regression: on older SQLite (RHEL7/8) unixepoch() is missing, so relying
+    # on the column's timestamp DEFAULT makes every live insert fail. We must
+    # always pass an explicit timestamp. Simulate that by giving the column a
+    # default that would error if evaluated.
+    conn = sqlite3.connect(":memory:")
+    conn.executescript(
+        "CREATE TABLE command_history ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " command TEXT NOT NULL, cwd TEXT NOT NULL,"
+        " exit_status INTEGER NOT NULL DEFAULT 0,"
+        " timestamp REAL NOT NULL DEFAULT (this_function_does_not_exist()));"
+    )
+    # Must not raise, and must populate a real timestamp.
+    daemon._insert_row(conn, {"command": "ls", "cwd": "/p", "exit_status": 0})
+    row = conn.execute("SELECT command, timestamp FROM command_history").fetchone()
+    assert row[0] == "ls"
+    assert row[1] and row[1] > 0
+    conn.close()
+
+
+def test_dedupe_is_idempotent_on_clean_db():
+    db = _mem_db()
+    db.execute(
+        "INSERT INTO command_history (command, cwd, exit_status, timestamp) VALUES ('git', '~', 0, 1.0)"
+    )
+    db.commit()
+    assert daemon.dedupe_history(db) == 0
+    assert daemon.dedupe_history(db) == 0
+
+
+def test_run_daemon_start_detaches_by_default(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(daemon, "_cmd_start", lambda foreground=False: captured.update(fg=foreground))
+    monkeypatch.setattr(daemon.sys, "argv", ["suggest-daemon", "start"])
+    daemon.run_daemon()
+    assert captured["fg"] is False
+
+
+def test_run_daemon_start_foreground_flag(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(daemon, "_cmd_start", lambda foreground=False: captured.update(fg=foreground))
+    monkeypatch.setattr(daemon.sys, "argv", ["suggest-daemon", "start", "--foreground"])
+    daemon.run_daemon()
+    assert captured["fg"] is True
+
+

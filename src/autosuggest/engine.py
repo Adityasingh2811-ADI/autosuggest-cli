@@ -66,6 +66,9 @@ CREATE TABLE IF NOT EXISTS command_history (
     command TEXT NOT NULL,
     cwd TEXT NOT NULL,
     exit_status INTEGER NOT NULL DEFAULT 0,
+    -- Fractional Unix timestamp; two equivalent formulations:
+    --   HEAD:     strftime('%s','now') + (strftime('%f','now') - strftime('%S','now'))
+    --   incoming: (julianday('now') - 2440587.5) * 86400.0
     timestamp REAL NOT NULL DEFAULT (strftime('%s', 'now') + (strftime('%f', 'now') - strftime('%S', 'now')))
 );
 CREATE INDEX IF NOT EXISTS idx_frecency
