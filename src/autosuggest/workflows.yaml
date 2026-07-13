@@ -81,6 +81,8 @@ workflows:
 
   - name: "perforce"
     steps:
+      - pattern: "p4 info*"
+        next: ["p4 sync", "p4 opened", "p4 changes -m 5"]
       - pattern: "p4 sync*"
         next: ["p4 opened", "p4 status", "p4 changes -m 5"]
       - pattern: "p4 edit *"
@@ -117,8 +119,14 @@ workflows:
     steps:
       - pattern: "module load *"
         next: ["module list", "which vivado", "which p4"]
+      - pattern: "module unload *"
+        next: ["module list", "module avail"]
+      - pattern: "module swap *"
+        next: ["module list", "which"]
       - pattern: "module avail*"
         next: ["module load", "module list"]
       - pattern: "module list*"
-        next: ["module load", "module purge"]
+        next: ["module load", "module purge", "module unload"]
+      - pattern: "make"
+        next: ["make clean", "make -j", "ls"]
 

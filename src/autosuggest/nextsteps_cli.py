@@ -22,11 +22,14 @@ def main() -> None:
             except ValueError:
                 pass
 
-    engine = PredictionEngine()
-    resolver = NextStepResolver(engine)
-    for s in resolver.suggest(last_command, cwd, limit=limit):
-        print(f"{s.command}\t{s.source}\t{s.confidence}")
-    engine.close()
+    try:
+        engine = PredictionEngine()
+        resolver = NextStepResolver(engine)
+        for s in resolver.suggest(last_command, cwd, limit=limit):
+            print(f"{s.command}\t{s.source}\t{s.confidence}")
+        engine.close()
+    except Exception:
+        return
 
 
 if __name__ == "__main__":

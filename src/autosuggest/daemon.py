@@ -258,7 +258,7 @@ def _acquire_singleton_lock() -> bool:
     lock_file = PID_PATH.with_suffix(".lock")
     fh = open(lock_file, "w")
     try:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.lockf(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         fh.close()
         return False
