@@ -2,7 +2,7 @@
             AUTOSUGGEST-CLI — COMPREHENSIVE DESIGN DOCUMENT
 ================================================================================
 
-  Project:     cli-autosuggest v0.4.0
+  Project:     cli-autosuggest v0.6.0
   Date:        2026-06-15
   Author:      ASingh56 / CLI Tooling Team, Analog Devices
   Status:      Production-ready for internal deployment
@@ -103,18 +103,20 @@ TABLE OF CONTENTS
   +----------+------------------+-------------------+-----------------+
              |                  |                   |
      Ghost-text query     Telemetry send      Next-steps query
-     (ICommandPredictor)  (TCP fire-forget)   (prompt function)
+     (ICommandPredictor)  (Unix socket        (prompt function)
+                           fire-forget)
              |                  |                   |
              v                  v                   v
   +-------------------+  +------------------+  +-------------------+
   |  query.py         |  |  Daemon          |  |  nextsteps_cli.py |
-  |  (prefix search)  |  |  (TCP listener)  |  |  (sequence match) |
+  |  (prefix search)  |  | (Unix socket     |  |  (sequence match) |
+  |                   |  |   listener)      |  |                   |
   +--------+----------+  +--------+---------+  +--------+----------+
            |                      |                      |
            v                      v                      v
   +-------------------------------------------------------------------+
   |                    SQLite Database                                  |
-  |                (~/.cli_autosuggest.db)                              |
+  |       (~/.local/share/autosuggest/history.db)                      |
   |                                                                    |
   |  command_history: command, cwd, exit_status, timestamp             |
   |  Indexes: frecency (cwd+time), global_recency, frequency          |
@@ -125,7 +127,7 @@ TABLE OF CONTENTS
 
   1. Shell hook loads on profile startup
   2. ICommandPredictor queries engine as user types (PS7+)
-  3. User executes command → telemetry sent to daemon via TCP
+  3. User executes command → telemetry sent to daemon via Unix socket
   4. Daemon writes to SQLite in background
   5. Prompt function queries nextsteps_cli for post-command suggestions
   6. Next prompt displays color-coded next-step suggestions
@@ -138,7 +140,7 @@ TABLE OF CONTENTS
   Output: Ghost-text inline / Tab menu / Next-step display
 
   Input:  Completed command execution
-  Record: command + cwd + exit_status → TCP → Daemon → SQLite
+  Record: command + cwd + exit_status → Unix socket → Daemon → SQLite
 
 ================================================================================
 5. CORE ALGORITHM: FRECENCY SCORING
@@ -220,7 +222,7 @@ TABLE OF CONTENTS
   FILE                    PURPOSE
   ----                    -------
   engine.py               Core frecency scoring + SQLite queries
-  daemon.py               Background TCP server, database writer
+  daemon.py               Background Unix socket server, database writer
   main.py                 Interactive prompt_toolkit shell (suggest)
   hooks.py                Bash/PowerShell hook code generation
   query.py                Lightweight CLI: prefix → suggestions
@@ -228,6 +230,9 @@ TABLE OF CONTENTS
   next_steps.py           NextStepResolver (workflow rules + learned)
   arg_completers.py       Live argument completions (git, docker, etc.)
   importer.py             Shell history import (bash, PowerShell)
+  shell_session.py        Shell backend abstraction: TcshBackend,
+                          BashBackend (command execution, env export,
+                          history read, hook emit per shell dialect)
   stats.py                Usage statistics display
   workflows.yaml          Team-defined workflow patterns
 
@@ -257,11 +262,11 @@ TABLE OF CONTENTS
   --------------------
   1. _autosuggest_ensure_daemon    — Auto-start daemon if not running
   2. _autosuggest_hook             — PROMPT_COMMAND telemetry sender
-  3. Uses /dev/tcp or python fallback for TCP send
+  3. Uses Unix socket or python fallback for send
 
   TELEMETRY PROTOCOL
   ------------------
-  Transport: TCP 127.0.0.1:19526
+  Transport: Unix socket ($XDG_RUNTIME_DIR/autosuggest.sock)
   Format:    JSON: {"command": "...", "cwd": "...", "exit_status": N}
   Timeout:   100ms (fire-and-forget)
   Failure:   Silent drop (no user-visible error)
@@ -521,8 +526,9 @@ TABLE OF CONTENTS
      the right suggestions surface in the right project automatically.
 
   3. LOW ADOPTION BARRIER
-     pip install + one-line profile edit. No IT tickets, no admin rights
-     (beyond Python), no server provisioning. Engineers can self-serve.
+     git clone + bash install-linux.sh + one-line profile edit.
+     No IT tickets, no admin rights (beyond Python), no server
+     provisioning. Engineers can self-serve.
 
   4. COMPOUNDING RETURNS
      Unlike a static cheat-sheet, the tool improves daily. After 1 month,
@@ -538,23 +544,40 @@ TABLE OF CONTENTS
 
   DATA LOCALITY
   -------------
-  - All data stored locally in ~/.cli_autosuggest.db
-  - No network traffic beyond localhost (127.0.0.1:19526)
+  - All data stored locally in ~/.local/share/autosuggest/history.db
+  - Transport is a per-user Unix socket ($XDG_RUNTIME_DIR/autosuggest.sock)
+  - No network traffic outside the local machine
   - No cloud services, no telemetry to external endpoints
   - No API keys or credentials required
 
   SENSITIVE COMMAND HANDLING
   --------------------------
-  - Commands containing passwords/tokens ARE recorded (by design —
-    the tool records what the shell records)
-  - Mitigation: use environment variables for secrets, not CLI args
-  - The database file has standard user-permission access controls
-  - Future: optional regex filters to exclude sensitive patterns
+  - Commands containing passwords/tokens are REDACTED before storage.
+    The redaction engine masks the following patterns before a record
+    is written to the database:
+
+      Pattern                         Action
+      -------                         ------
+      --password=<value>              Masked (value replaced with ****)
+      -p <value> (password short flag) Masked
+      API keys (common env-var forms) Masked
+      AWS_SECRET_ACCESS_KEY values    Masked
+      GitHub personal access tokens   Masked
+      Bearer <token> in any argument  Masked
+      git remote URLs with credentials Masked (https://user:pass@host)
+      sshpass -p <value>              Masked
+      ssh-keygen passphrase args      Masked
+
+  - Commands on the DENYLIST (e.g. `p4 -P`) are DROPPED ENTIRELY and
+    never reach the database.
+  - The database file has standard user-permission (0600) access controls.
+  - Users should still prefer environment variables for secrets over
+    CLI arguments as a defence-in-depth practice.
 
   DAEMON SECURITY
   ----------------
-  - Binds to 127.0.0.1 only (not 0.0.0.0)
-  - No authentication (localhost trust model)
+  - Listens on a Unix domain socket (not a TCP port)
+  - Access controlled by filesystem permissions (owner-only)
   - Accepts only well-formed JSON, drops malformed payloads
   - No code execution from received data
 
@@ -586,8 +609,11 @@ TABLE OF CONTENTS
   ----------------------
   One-time setup per engineer (< 2 minutes):
 
-    pip install cli-autosuggest
-    suggest-import
+    git clone https://github.com/Adityasingh2811-ADI/autosuggest-cli.git
+    cd autosuggest-cli
+    bash install-linux.sh
+    suggest-import          # import existing shell history
+    suggest-seed            # seed with team workflow patterns
     suggest-hook install powershell   (or bash)
 
   Zero infrastructure. Zero IT support. Self-service deployment.
@@ -606,7 +632,7 @@ TABLE OF CONTENTS
       (3.10+ syntax: `X | None`, `tuple[...]`), and 3.6's bundled pip
       uses the legacy `setup.py egg_info` path that fails against this
       project's pyproject.toml-only build. The module MUST be loaded
-      before pip install and before any use of the tool.
+      before running install-linux.sh and before any use of the tool.
 
     CONSTRAINT 2 — Non-persistent environment
       Modules and PATH edits (`set path = ($HOME/.local/bin $path)` in
@@ -648,21 +674,28 @@ TABLE OF CONTENTS
 17. FUTURE ROADMAP
 ================================================================================
 
-  NEAR-TERM (v0.5)
-  -----------------
-  - Sensitive command filtering (regex exclusion list)
+  DELIVERED
+  ---------
+  v0.5:
+  - Sensitive command filtering / redaction engine (--password=, -p,
+    API keys, AWS keys, GitHub tokens, Bearer tokens, git credential
+    URLs, sshpass, ssh-keygen passphrases; denylist for p4 -P etc.)
   - Multi-machine database sync (optional, via shared drive)
   - Bash ghost-text via zsh-autosuggestions-style integration
 
-  MEDIUM-TERM (v0.6)
-  -------------------
+  v0.6:
   - Team analytics dashboard (aggregate, anonymized)
   - Workflow suggestion mining (auto-generate rules from team data)
   - Integration with VS Code terminal
+  - Unix socket transport replacing TCP listener
+  - DB path migrated to ~/.local/share/autosuggest/history.db (XDG)
+  - shell_session.py with TcshBackend and BashBackend
 
-  LONG-TERM (v1.0)
-  -----------------
-  - LLM-assisted suggestions for novel commands
+  FUTURE (v1.0+)
+  ---------------
+  - Team-shared suggestion layer (opt-in aggregate model across team)
+  - Project-specific workflow YAML contributions (per-repo .autosuggest/)
+  - AI-powered suggestions (LLM-assisted completion for novel commands)
   - Natural language → command translation
   - Project-type detection (auto-suggest build systems)
 

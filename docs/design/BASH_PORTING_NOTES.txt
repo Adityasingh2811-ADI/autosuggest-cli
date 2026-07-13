@@ -166,9 +166,16 @@
 6. WHY USERS MUST SWITCH FROM CSH/TCSH TO BASH
 ================================================================================
 
-  On the managed host the LOGIN shell is tcsh/csh. The tool's hook is NOT
-  implemented for csh, and cannot reasonably be, because csh/tcsh lack the
-  facilities every part of the integration depends on:
+  NOTE (v0.6.0): A native TcshBackend now exists in shell_session.py that
+  delivers telemetry recording and next-step suggestions directly inside
+  tcsh — no shell switch required for those features. Users only need to
+  switch to bash or zsh for inline ghost-text and Tab-completion frecency,
+  which depend on line-editor primitives tcsh does not expose. The rest of
+  this section explains WHY those full features require bash/zsh.
+
+  On the managed host the LOGIN shell is tcsh/csh. Full hook support is NOT
+  possible in csh/tcsh for inline ghost text and Tab completion because those
+  features require facilities csh/tcsh lack:
 
     Needed primitive            bash/zsh        csh/tcsh
     ----------------            --------        --------
@@ -368,7 +375,6 @@
     - `$?prompt` + the file's top guard => only interactive logins switch;
       scp/rsync/batch are untouched.
     - AUTOSUGGEST_ACTIVE => loop guard (the spawned bash won't re-trigger).
-    - `exec` replaces csh (no nesting) so `exit` logs out normally.
     - KILL SWITCH: `touch ~/.no_autosuggest` disables auto-bash on next
       login; `rm ~/.no_autosuggest` re-enables. One-off pure csh in a live
       session: `exec tcsh -f`.
@@ -401,8 +407,10 @@
   - Bash: hardened telemetry (no more suspended jobs) + accept-binding +
     frecency Tab completion + next-step suggestions.
   - Zsh: full parity including live inline ghost text via zle POSTDISPLAY.
-  - csh/tcsh: unchanged as login shell; users enter bash (or zsh) to use
-    the tool. No csh hook is planned (csh lacks the required primitives).
+  - csh/tcsh: a native TcshBackend now exists (shell_session.py, v0.6.0)
+    providing telemetry recording and next-step suggestions in tcsh without
+    requiring a shell switch. Inline ghost text and Tab completion still
+    require bash or zsh (tcsh lacks the required line-editor primitives).
   - Deployment: documented per-session bootstrap (module load + PATH +
     bash + eval) for managed hosts where dotfiles are read-only.
   - Global activation: csh auto-exec's a hooked bash that also loads the

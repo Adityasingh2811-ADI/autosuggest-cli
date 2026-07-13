@@ -21,22 +21,19 @@ pip install git+https://github.com/Adityasingh2811-ADI/autosuggest-cli.git
 
 Requires Python 3.10+.
 
-### ADI team install (managed hosts) — no git, no network
+### ADI team install (managed hosts)
 
-If your team lead has published a shared copy, you don't need git, GitHub
-access, or a modern default Python. Just run the installer from the shared
-path they gave you — it loads Python for you and installs from a local,
-offline wheelhouse into your own `~/.local`:
+Clone the repo and run the installer — it loads Python for you and installs
+into your own `~/.local`:
 
 ```bash
-bash /home/asingh56/autosuggest-cli/install-linux.sh
+git clone https://github.com/Adityasingh2811-ADI/autosuggest-cli.git
+cd autosuggest-cli
+bash install-linux.sh
 rehash            # tcsh only, so it finds the new commands
-suggest-start     # hooked bash with Python + Perforce + modules
 ```
 
-That path is the shared copy your team lead published; re-running it is safe
-(it clean-reinstalls). Maintainers: to publish or refresh that shared copy, see
-[Publishing a shared copy](#publishing-a-shared-copy-maintainers) below.
+Re-running the installer is safe (it never duplicates dotfile entries).
 
 ### Managed Linux hosts (Exceed TurboX / EDA-CAD farms) — one-shot install
 
@@ -79,42 +76,13 @@ exec tcsh -f              # drop to plain csh for the current session
 
 See [BASH_PORTING_NOTES.txt](docs/design/BASH_PORTING_NOTES.txt) for the full rationale.
 
-### Publishing a shared copy (maintainers)
+### Updates (maintainers and users)
 
-To let teammates install without git or network access, publish a shared,
-read-only copy once (and again whenever you want to ship an update). With no
-`AUTOSUGGEST_SHARE` set it publishes to `$HOME/autosuggest-cli`:
+To update to the latest version:
 
 ```bash
-module load python/adi/3.12.2
-bash install-linux.sh publish                       # -> $HOME/autosuggest-cli
-# or a custom location:
-AUTOSUGGEST_SHARE=/some/shared/path bash install-linux.sh publish
+cd ~/autosuggest-cli && git pull && bash install-linux.sh
 ```
-
-This clones/updates the repo there, builds an **offline wheelhouse** (`dist/` —
-the package plus all dependencies), makes it world-readable (`a+rX`), and
-**checks that a non-group user can actually reach it** — warning you with the
-exact `chmod` to run if any parent directory isn't traversable.
-
-Because the farm is all NFS, any user on any host can then install with **two
-commands** (no copy, no git, no network) — the `publish` output prints them:
-
-```bash
-bash $HOME/autosuggest-cli/install-linux.sh
-rehash
-```
-
-**Reaching users outside your group:** they only need read + traverse on the
-path, not group membership. If you publish under your home, open just the
-traverse bit so others can pass through to the (world-readable) tool dir:
-
-```bash
-chmod o+x $HOME       # lets others traverse to a known path; does NOT list your home
-```
-
-The `publish` step's reachability check tells you if this is needed. Project
-spaces (`/proj*`) are already world-traversable, so no `chmod` is needed there.
 
 ## Quick Start
 
@@ -261,7 +229,7 @@ suggest-import --powershell PATH
 
 ## How It Works
 
-1. **Daemon** (`suggest-daemon`) — an async socket server that receives command telemetry and writes to `~/.cli_autosuggest.db` (SQLite with WAL mode)
+1. **Daemon** (`suggest-daemon`) — an async socket server that receives command telemetry and writes to `~/.local/share/autosuggest/history.db` (SQLite with WAL mode)
 2. **Engine** — queries the database with prefix matching, scores results using exponential recency decay (1-hour half-life) and a 3x context boost for commands run in the same directory
 3. **Next-step resolver** — combines learned sequential patterns (command A often followed by command B) with predefined workflow rules (git flow, python dev, docker, etc.)
 4. **TUI** — prompt-toolkit session that ties it all together with ghost-text, completion menus, and keybindings
@@ -275,15 +243,19 @@ The engine ships with workflow rules for common sequences:
 - **build-test-deploy** — `make build` -> `make test` -> `make deploy`
 - **docker** — `docker build` -> `docker run` -> `docker ps`
 - **navigation** — `cd` -> `ls` / `git status`
+- **vivado** — Vivado FPGA build and synthesis sequences
+- **perforce** — `p4 sync` -> `p4 edit` -> `p4 submit` workflows
+- **simulation** — HDL simulation sequences (compile -> elaborate -> simulate)
+- **modules** — `module avail` -> `module load` -> `module list`
 
 These complement (not replace) learned patterns from your actual usage.
 
 ## Data Storage
 
 All data stays local:
-- **Database:** `~/.cli_autosuggest.db`
-- **PID file:** `~/.cli_autosuggest.pid`
-- **Socket:** `/tmp/cli_autosuggest.sock` (Unix) or `127.0.0.1:19526` (Windows)
+- **Database:** `~/.local/share/autosuggest/history.db`
+- **PID file:** `$XDG_RUNTIME_DIR/autosuggest.pid` (fallback: `/tmp/autosuggest-{uid}/autosuggest.pid`)
+- **Socket:** `$XDG_RUNTIME_DIR/autosuggest.sock` (fallback: `/tmp/autosuggest-{uid}/autosuggest.sock`) or `127.0.0.1:19526` (Windows)
 
 ## License
 

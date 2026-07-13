@@ -72,11 +72,12 @@ TABLE OF CONTENTS
 
   A) MANAGED ADI HOST (Exceed TurboX / EDA-CAD farm, tcsh login) — RECOMMENDED
   ---------------------------------------------------------------------------
-  Your team lead publishes a shared copy; you install from it with TWO
-  commands. No git, no network, no worrying about which Python is the
-  default, and it seeds your history for you (no separate suggest-import):
+  Clone the repository from GitHub and run the installer. It handles Python
+  selection and seeds your history for you (no separate suggest-import):
 
-      bash /home/asingh56/autosuggest-cli/install-linux.sh
+      git clone https://github.com/Adityasingh2811-ADI/autosuggest-cli.git
+      cd autosuggest-cli
+      bash install-linux.sh
       rehash
 
   Then start it:
@@ -84,9 +85,8 @@ TABLE OF CONTENTS
       suggest-start        # hooked bash with Python + Perforce + modules;
                            # type 'exit' to return to your tcsh prompt
 
-  (That path is the shared copy your team lead published. Re-running the
-  installer is safe — it clean-reinstalls. New logins drop you into the
-  hooked bash automatically.)
+  (Re-running the installer is safe — it clean-reinstalls. New logins
+  drop you into the hooked bash automatically.)
 
   B) JUST WANT THE HELPER WINDOW (any shell, any OS)
   --------------------------------------------------
@@ -151,16 +151,15 @@ TABLE OF CONTENTS
 
   MANAGED ADI HOST (Exceed TurboX / EDA-CAD farm) — RECOMMENDED
   -------------------------------------------------------------
-  Install from the shared copy your team lead published. This needs no git,
-  no network, and loads a modern Python for you (the system python3 is often
-  too old). It installs into your own ~/.local:
+  Clone from GitHub and run the installer. It loads a modern Python for you
+  (the system python3 is often too old) and installs into your own ~/.local:
 
-    bash /home/asingh56/autosuggest-cli/install-linux.sh
+    git clone https://github.com/Adityasingh2811-ADI/autosuggest-cli.git
+    cd autosuggest-cli
+    bash install-linux.sh
     rehash            # tcsh only, so it finds the new commands
 
   Re-running is safe (clean reinstall). Then use `suggest-start` or `suggest`.
-  Maintainers publish/refresh that shared copy with `install-linux.sh publish`
-  (see the project README, "Publishing a shared copy").
 
   FROM SOURCE (DEVELOPMENT)
   -------------------------
@@ -195,6 +194,7 @@ TABLE OF CONTENTS
     suggest-nextsteps    Next-step suggestion CLI
     suggest-stats        Usage statistics
     suggest-selftest     Non-interactive health check (PASS/FAIL report)
+    suggest-seed         Seed the DB with common commands from a bundled JSON file
 
 ================================================================================
 4. QUICK START (5 MINUTES)
@@ -383,13 +383,9 @@ TABLE OF CONTENTS
   ------------------
   After setup, run a few commands in your shell, then:
 
-    python -c "
-    import sqlite3; from pathlib import Path
-    c = sqlite3.connect(str(Path.home()/'.cli_autosuggest.db'))
-    print(c.execute('SELECT COUNT(*) FROM command_history').fetchone()[0])
-    "
+    suggest-selftest
 
-  The count should increase with each command you run.
+  The count of live/imported rows should increase with each command you run.
 
   UNINSTALLING THE HOOK
   ---------------------
@@ -727,9 +723,9 @@ TABLE OF CONTENTS
 
   DATA LOCATIONS
   ---------------
-    Database:  ~/.cli_autosuggest.db
-    Pidfile:   ~/.cli_autosuggest.pid
-    TCP Port:  127.0.0.1:19526
+    Database:  ~/.local/share/autosuggest/history.db
+    Socket:    $XDG_RUNTIME_DIR/autosuggest.sock
+               (fallback: /tmp/autosuggest-{uid}/autosuggest.sock)
 
   The database is a single SQLite file. Copy it between machines
   to transfer your command history.
@@ -859,6 +855,14 @@ TABLE OF CONTENTS
 
     suggest-stats
 
+  suggest-seed
+  ------------
+  Seed the suggestion database with a curated set of common commands loaded
+  from a bundled JSON file. Useful as a cold-start boost before your own
+  history has been imported.
+
+    suggest-seed
+
 ================================================================================
 16. TROUBLESHOOTING
 ================================================================================
@@ -866,13 +870,9 @@ TABLE OF CONTENTS
   PROBLEM: "No suggestions appearing"
   ------------------------------------
   1. Check database has data:
-       suggest-daemon status
-       python -c "
-       import sqlite3; from pathlib import Path
-       c = sqlite3.connect(str(Path.home()/'.cli_autosuggest.db'))
-       print('Commands:', c.execute('SELECT COUNT(*) FROM command_history').fetchone()[0])
-       "
-     If 0: run `suggest-import` to bootstrap.
+       suggest-selftest
+     If row count is 0: run `suggest-import` to bootstrap, or `suggest-seed`
+     to pre-populate with common commands.
 
   2. Test directly:
        python -c "
@@ -884,13 +884,13 @@ TABLE OF CONTENTS
 
   PROBLEM: "Daemon won't start"
   ------------------------------
-  1. Check port:
-       netstat -an | findstr 19526       (Windows)
-       ss -tlnp | grep 19526            (Linux)
+  1. Check socket file exists:
+       ls $XDG_RUNTIME_DIR/autosuggest.sock 2>/dev/null || \
+         ls /tmp/autosuggest-$(id -u)/autosuggest.sock   (Linux)
 
-  2. Remove stale pidfile:
+  2. Remove stale socket / restart:
        suggest-daemon status
-       del ~/.cli_autosuggest.pid        (Windows)
+       suggest-daemon stop
        suggest-daemon start
 
   PROBLEM: "Shell hook not recording"
@@ -899,11 +899,13 @@ TABLE OF CONTENTS
   2. Is hook installed?
        Select-String autosuggest $PROFILE       (PowerShell)
        grep autosuggest ~/.bashrc               (bash)
-  3. Test manually:
+  3. Test manually (replace UID with your numeric user ID from `id -u`):
        python -c "
-       import socket, json
-       s = socket.socket(); s.settimeout(1)
-       s.connect(('127.0.0.1', 19526))
+       import socket, json, os
+       sock_path = os.environ.get('XDG_RUNTIME_DIR', '/tmp/autosuggest-' + str(os.getuid())) + '/autosuggest.sock'
+       s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+       s.settimeout(1)
+       s.connect(sock_path)
        s.sendall(json.dumps({'command':'test','cwd':'.','exit_status':0}).encode())
        s.close(); print('OK')
        "
@@ -973,9 +975,9 @@ TABLE OF CONTENTS
 
   REMOVE DATA (OPTIONAL)
   -----------------------
-  Delete these files to remove all stored history:
-    ~/.cli_autosuggest.db
-    ~/.cli_autosuggest.pid
+  Delete these paths to remove all stored history and runtime state:
+    ~/.local/share/autosuggest/history.db
+    $XDG_RUNTIME_DIR/autosuggest.sock  (or /tmp/autosuggest-{uid}/)
 
 ================================================================================
   END OF USER GUIDE
