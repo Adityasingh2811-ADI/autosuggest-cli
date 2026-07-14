@@ -251,7 +251,11 @@ class CommandRunner:
         wrapper_lines = [
             "#!/bin/tcsh -f",
             'if ( $?MODULESHOME ) then',
-            '    if ( -f "$MODULESHOME/init/tcsh" ) source "$MODULESHOME/init/tcsh" >& /dev/null',
+            '    if ( -f "$MODULESHOME/init/tcsh" ) then',
+            '        source "$MODULESHOME/init/tcsh" >& /dev/null',
+            '    else if ( -f "$MODULESHOME/module.csh" ) then',
+            '        source "$MODULESHOME/module.csh" >& /dev/null',
+            '    endif',
             'endif',
             command,
             'set _as_rc = $status',
