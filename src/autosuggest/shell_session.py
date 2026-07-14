@@ -222,11 +222,24 @@ class CommandRunner:
             except OSError:
                 pass
 
+    _TCSH_ALIAS_MAP = {
+        "pinit": "source /cad/adi/apps/adi/adv/release6/script/gpms/pinit",
+    }
+
+    def _expand_tcsh_aliases(self, command: str) -> str:
+        """Expand known csh aliases that aren't available under tcsh -f."""
+        parts = command.split(None, 1)
+        if parts and parts[0] in self._TCSH_ALIAS_MAP:
+            expansion = self._TCSH_ALIAS_MAP[parts[0]]
+            args = parts[1] if len(parts) > 1 else ""
+            return f"{expansion} {args}".strip()
+        return command
+
     def run(self, command: str) -> int:
         """Execute ``command`` and return its exit status."""
         if self.persistent:
             if self._backend == "tcsh":
-                return self._run_tcsh(command)
+                return self._run_tcsh(self._expand_tcsh_aliases(command))
             return self._run_bash(command)
         return self._run_fallback(command)
 
