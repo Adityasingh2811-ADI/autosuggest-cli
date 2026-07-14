@@ -257,6 +257,15 @@ All data stays local:
 - **PID file:** `$XDG_RUNTIME_DIR/autosuggest.pid` (fallback: `/tmp/autosuggest-{uid}/autosuggest.pid`)
 - **Socket:** `$XDG_RUNTIME_DIR/autosuggest.sock` (fallback: `/tmp/autosuggest-{uid}/autosuggest.sock`) or `127.0.0.1:19526` (Windows)
 
+## Recent Changes
+
+- **Auth token in REPL telemetry** — `_send_telemetry()` now includes the daemon auth token, matching `record.py` behavior
+- **Socket leak fix** — sockets in `record.py` and `main.py` are now closed via `try/finally`, preventing fd leaks on `sendall()` errors
+- **SQL parameterization** — replaced f-string `LIMIT {int(n)}` with `LIMIT ?` placeholder in `stats.py`
+- **Ghost-text prefix guard** — validates `startswith()` before slicing suffix, preventing garbage suggestions from non-prefix matches
+- **NO_COLOR / isatty support** — `stats.py` and `selftest.py` respect `NO_COLOR` env var and check `sys.stdout.isatty()` before emitting ANSI codes
+- **ADI EDA workflows** — added adsim, percipient, ADV workspace, synthesis/PnR, formal verification, LSF jobs, and coverage workflows
+
 ## License
 
 MIT

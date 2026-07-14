@@ -66,7 +66,207 @@ workflows:
       - pattern: "dir*"
         next: ["cd", "type", "code ."]
 
-  # --- EDA / CAD flows for ADI managed hosts (Vivado, Perforce, sim, modules) ---
+  # --- EDA / CAD flows for ADI managed hosts ---
+
+  - name: "adsim"
+    steps:
+      - pattern: "adsim -co *"
+        next:
+          - "adsim -no_compile"
+          - "adsim -so"
+          - "cat compile.log"
+      - pattern: "adsim -so *"
+        next:
+          - "cat xrun.log"
+          - "simvision"
+          - "adsim -gui"
+      - pattern: "adsim -regr *"
+        next:
+          - "cat regression_report.html"
+          - "adsim -cov_merge"
+          - "adsim -regr -batch"
+          - "grep -i fail regression_report.html"
+      - pattern: "adsim -gui *"
+        next:
+          - "adsim -debug shm"
+          - "simvision"
+      - pattern: "adsim -coverage *"
+        next:
+          - "adsim -cov_merge"
+          - "adsim -grade"
+          - "imc"
+      - pattern: "adsim -cov_merge*"
+        next:
+          - "imc"
+          - "adsim -grade"
+          - "cat cov_merge.log"
+      - pattern: "adsim -batch *"
+        next:
+          - "bjobs"
+          - "cat xrun.log"
+          - "adsim -regr"
+      - pattern: "adsim -formal *"
+        next:
+          - "cat formal.log"
+          - "adsim -jasper"
+          - "adsim -superlint"
+      - pattern: "adsim -jasper *"
+        next:
+          - "cat jasper.log"
+          - "adsim -jgcov"
+      - pattern: "adsim -superlint *"
+        next:
+          - "cat superlint.log"
+          - "adsim -formal"
+      - pattern: "adsim -gate *"
+        next:
+          - "adsim -gate -best"
+          - "adsim -gate -lowt"
+          - "cat xrun.log"
+          - "grep -i 'timing violation' xrun.log"
+      - pattern: "adsim -debug *"
+        next:
+          - "simvision"
+          - "adsim -gui"
+          - "cat xrun.log"
+      - pattern: "adsim -clean *"
+        next:
+          - "adsim -co"
+          - "adsim"
+      - pattern: "adsim -repeat *"
+        next:
+          - "cat regression_report.html"
+          - "grep -i fail xrun.log"
+      - pattern: "adsim -ida *"
+        next:
+          - "cat xrun.log"
+          - "verisium debug"
+      - pattern: "adsim -xprop *"
+        next:
+          - "cat xrun.log"
+          - "grep -i xprop xrun.log"
+      - pattern: "adsim *"
+        next:
+          - "adsim -no_compile"
+          - "adsim -regr"
+          - "adsim -debug shm"
+          - "adsim -gui"
+          - "cat xrun.log"
+
+  - name: "adsim-regression"
+    steps:
+      - pattern: "adsim -regr *.regr*"
+        next:
+          - "adsim -regr -batch"
+          - "adsim -regr -keep"
+          - "adsim -regr -coverage"
+          - "bjobs"
+      - pattern: "adsim -regr *-batch*"
+        next:
+          - "bjobs"
+          - "bpeek"
+          - "cat regression_report.html"
+      - pattern: "adsim -regr *-ra*"
+        next:
+          - "cat regression_report.html"
+          - "simvision"
+      - pattern: "adsim -regr *-ru*"
+        next:
+          - "cat regression_report.html"
+          - "simvision"
+
+  - name: "adv-workspace"
+    steps:
+      - pattern: "adv --login*"
+        next:
+          - "adv"
+          - "pinit"
+          - "p4 info"
+      - pattern: "adv *"
+        next:
+          - "pinit"
+          - "pi ws st -v"
+          - "p4 info"
+      - pattern: "pinit *"
+        next:
+          - "pi ws st -v"
+          - "p4 opened"
+          - "p4 info"
+          - "module list"
+
+  - name: "percipient"
+    steps:
+      - pattern: "pi ws st*"
+        next:
+          - "pi update"
+          - "pi ip local"
+          - "pi ip diff"
+          - "p4 opened"
+      - pattern: "pi update*"
+        next:
+          - "pi ws st -v"
+          - "p4 opened"
+          - "adsim -regr"
+      - pattern: "pi ip local *"
+        next:
+          - "p4 edit"
+          - "p4 add"
+          - "pi ws st -v"
+      - pattern: "pi ip diff *"
+        next:
+          - "pi rel"
+          - "pi update"
+          - "p4 opened"
+      - pattern: "pi ip ls *"
+        next:
+          - "pi update"
+          - "pi ip diff"
+      - pattern: "pi rel *"
+        next:
+          - "pi ws st -v"
+          - "pi update"
+          - "adsim -regr"
+      - pattern: "pi up *"
+        next:
+          - "pi ws st -v"
+          - "p4 opened"
+      - pattern: "pi ip edit *"
+        next:
+          - "pi up"
+          - "pi ws st -v"
+      - pattern: "pi ws rm *"
+        next:
+          - "pi ws ls"
+
+  - name: "perforce"
+    steps:
+      - pattern: "p4 sync*"
+        next: ["p4 opened", "p4 status", "p4 changes -m 5"]
+      - pattern: "p4 info*"
+        next: ["p4 opened", "p4 changes -m 5", "pi ws st -v"]
+      - pattern: "p4 edit *"
+        next: ["p4 diff", "p4 opened", "p4 revert"]
+      - pattern: "p4 add *"
+        next: ["p4 opened", "p4 submit", "p4 revert"]
+      - pattern: "p4 opened*"
+        next: ["p4 diff", "p4 submit", "p4 revert"]
+      - pattern: "p4 diff*"
+        next: ["p4 submit", "p4 revert", "p4 opened"]
+      - pattern: "p4 submit*"
+        next: ["pi rel", "pi ws st -v", "p4 changes -m 5"]
+      - pattern: "p4 change*"
+        next: ["p4 submit", "p4 opened"]
+      - pattern: "p4 delete *"
+        next: ["p4 opened", "p4 submit"]
+      - pattern: "p4 move *"
+        next: ["p4 opened", "p4 submit"]
+      - pattern: "p4 status*"
+        next: ["p4 edit", "p4 add", "p4 opened"]
+      - pattern: "p4 filelog *"
+        next: ["p4 diff", "p4 edit"]
+      - pattern: "p4 revert *"
+        next: ["p4 opened", "p4 status"]
+
   - name: "vivado"
     steps:
       - pattern: "vivado -mode batch*"
@@ -79,27 +279,79 @@ workflows:
       - pattern: "vivado -source*"
         next: ["cat vivado.log", "grep -i 'critical warning' *.log", "vivado -mode gui"]
 
-  - name: "perforce"
+  - name: "synthesis-pnr"
     steps:
-      - pattern: "p4 info*"
-        next: ["p4 sync", "p4 opened", "p4 changes -m 5"]
-      - pattern: "p4 sync*"
-        next: ["p4 opened", "p4 status", "p4 changes -m 5"]
-      - pattern: "p4 edit *"
-        next: ["p4 diff", "p4 opened", "p4 revert"]
-      - pattern: "p4 add *"
-        next: ["p4 opened", "p4 submit", "p4 revert"]
-      - pattern: "p4 opened*"
-        next: ["p4 diff", "p4 submit", "p4 revert"]
-      - pattern: "p4 diff*"
-        next: ["p4 submit", "p4 revert", "p4 opened"]
-      - pattern: "p4 submit*"
-        next: ["p4 sync", "p4 changes -m 5"]
-      - pattern: "p4 change*"
-        next: ["p4 submit", "p4 opened"]
+      - pattern: "genus *"
+        next:
+          - "cat genus.log"
+          - "grep -i error genus.log"
+          - "genus -legacy_ui"
+      - pattern: "genus -f *"
+        next:
+          - "cat genus.log"
+          - "grep -i 'warning\\|error' genus.log"
+      - pattern: "innovus *"
+        next:
+          - "cat innovus.log"
+          - "grep -i error innovus.log"
+          - "innovus -stylus"
+      - pattern: "innovus -f *"
+        next:
+          - "cat innovus.log"
+          - "grep -i 'violation\\|error' innovus.log"
+      - pattern: "dc_shell *"
+        next:
+          - "cat dc.log"
+          - "grep -i error dc.log"
+      - pattern: "icc2_shell *"
+        next:
+          - "cat icc2.log"
+          - "grep -i error icc2.log"
+
+  - name: "formal-verification"
+    steps:
+      - pattern: "jg *"
+        next:
+          - "cat jg.log"
+          - "grep -i 'proven\\|cex\\|error' jg.log"
+      - pattern: "jg -superlint*"
+        next:
+          - "cat superlint.log"
+          - "grep -i violation superlint.log"
+      - pattern: "jg -fpv*"
+        next:
+          - "cat fpv.log"
+          - "grep -i 'proven\\|cex' fpv.log"
 
   - name: "simulation"
     steps:
+      - pattern: "xrun *"
+        next:
+          - "cat xrun.log"
+          - "grep -i error xrun.log"
+          - "simvision"
+      - pattern: "xrun -f *"
+        next:
+          - "cat xrun.log"
+          - "simvision"
+      - pattern: "irun *"
+        next: ["cat irun.log", "simvision"]
+      - pattern: "vcs *"
+        next:
+          - "cat vcs.log"
+          - "./simv"
+          - "grep -i error vcs.log"
+      - pattern: "./simv*"
+        next:
+          - "cat simv.log"
+          - "verdi"
+          - "grep -i error simv.log"
+      - pattern: "verdi *"
+        next:
+          - "cat verdi.log"
+      - pattern: "simvision *"
+        next:
+          - "cat xrun.log"
       - pattern: "xsim *"
         next: ["cat simulate.log", "grep -i error *.log", "gtkwave *.wdb"]
       - pattern: "xvlog *"
@@ -107,18 +359,27 @@ workflows:
       - pattern: "xelab *"
         next: ["xsim", "cat elaborate.log"]
       - pattern: "vsim *"
-        next: ["cat transcript", "grep -i error transcript", "gtkwave"]
+        next: ["cat transcript", "grep -i error transcript"]
       - pattern: "vlog *"
         next: ["vsim", "cat transcript"]
-      - pattern: "irun *"
-        next: ["cat irun.log", "simvision"]
-      - pattern: "xrun *"
-        next: ["cat xrun.log", "simvision"]
+
+  - name: "lsf-jobs"
+    steps:
+      - pattern: "bsub *"
+        next: ["bjobs", "bpeek", "bkill"]
+      - pattern: "bjobs*"
+        next: ["bpeek", "bkill", "bhist"]
+      - pattern: "bpeek *"
+        next: ["bjobs", "bkill"]
+      - pattern: "bkill *"
+        next: ["bjobs"]
+      - pattern: "bhist *"
+        next: ["bjobs", "bsub"]
 
   - name: "modules"
     steps:
       - pattern: "module load *"
-        next: ["module list", "which vivado", "which p4"]
+        next: ["module list", "which", "p4 info"]
       - pattern: "module unload *"
         next: ["module list", "module avail"]
       - pattern: "module swap *"
@@ -127,6 +388,21 @@ workflows:
         next: ["module load", "module list"]
       - pattern: "module list*"
         next: ["module load", "module purge", "module unload"]
-      - pattern: "make"
-        next: ["make clean", "make -j", "ls"]
+
+  - name: "coverage"
+    steps:
+      - pattern: "imc *"
+        next:
+          - "cat imc.log"
+          - "imc -gui"
+      - pattern: "imc -gui*"
+        next:
+          - "cat imc.log"
+      - pattern: "urg *"
+        next:
+          - "cat urgReport/dashboard.html"
+          - "firefox urgReport/dashboard.html"
+      - pattern: "vmanager *"
+        next:
+          - "cat vmanager.log"
 

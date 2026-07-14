@@ -27,7 +27,7 @@ from autosuggest.arg_completers import get_arg_completions
 from autosuggest.daemon import is_daemon_running
 from autosuggest.engine import PredictionEngine
 from autosuggest.next_steps import NextStepResolver
-from autosuggest.paths import socket_path
+from autosuggest.paths import socket_path, token_path
 from autosuggest.shell_session import CommandRunner
 
 SOCKET_PATH = socket_path()
@@ -118,11 +118,19 @@ def _build_keybindings() -> KeyBindings:
     return kb
 
 
+def _read_token() -> str:
+    try:
+        return token_path().read_text().strip()
+    except OSError:
+        return ""
+
+
 def _send_telemetry(command: str, cwd: str, exit_status: int) -> None:
     payload = json.dumps({
         "command": command,
         "cwd": cwd,
         "exit_status": exit_status,
+        "token": _read_token(),
     }).encode("utf-8")
     try:
         if IS_WINDOWS:

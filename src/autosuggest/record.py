@@ -36,18 +36,22 @@ def _send_socket(payload: bytes) -> bool:
             s = socket.socket(socket.AF_UNIX)
             s.settimeout(0.2)
             s.connect(str(SOCKET_PATH))
-            s.sendall(payload)
-            s.close()
-            return True
+            try:
+                s.sendall(payload)
+                return True
+            finally:
+                s.close()
         except OSError:
             pass
     try:
         s = socket.socket()
         s.settimeout(0.2)
         s.connect(("127.0.0.1", TCP_PORT))
-        s.sendall(payload)
-        s.close()
-        return True
+        try:
+            s.sendall(payload)
+            return True
+        finally:
+            s.close()
     except OSError:
         return False
 

@@ -24,12 +24,20 @@ import tempfile
 import time
 from pathlib import Path
 
-_GREEN = "\033[32m"
-_RED = "\033[31m"
-_YELLOW = "\033[33m"
-_CYAN = "\033[36m"
-_BOLD = "\033[1m"
-_RESET = "\033[0m"
+
+def _use_color() -> bool:
+    return sys.stdout.isatty() and "NO_COLOR" not in os.environ
+
+
+if _use_color():
+    _GREEN = "\033[32m"
+    _RED = "\033[31m"
+    _YELLOW = "\033[33m"
+    _CYAN = "\033[36m"
+    _BOLD = "\033[1m"
+    _RESET = "\033[0m"
+else:
+    _GREEN = _RED = _YELLOW = _CYAN = _BOLD = _RESET = ""
 
 
 # ---------------------------------------------------------------------------

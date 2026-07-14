@@ -5,12 +5,26 @@ metrics about usage patterns, top commands, and workflow efficiency.
 
 import argparse
 import json
+import os
 import sqlite3
 import sys
 import time
 from pathlib import Path
 
 from autosuggest.paths import db_path, apply_journal_mode
+
+
+def _use_color() -> bool:
+    return sys.stdout.isatty() and "NO_COLOR" not in os.environ
+
+
+_COLOR = _use_color()
+_BOLD = "\033[1m" if _COLOR else ""
+_CYAN = "\033[1;36m" if _COLOR else ""
+_GREEN = "\033[1;32m" if _COLOR else ""
+_YELLOW = "\033[1;33m" if _COLOR else ""
+_LCYAN = "\033[36m" if _COLOR else ""
+_RESET = "\033[0m" if _COLOR else ""
 
 DB_PATH = db_path()
 
@@ -38,7 +52,7 @@ def _format_duration(seconds: float) -> str:
 
 
 def _print_section(title: str) -> None:
-    print(f"\n  \033[1;36m{title}\033[0m")
+    print(f"\n  {_CYAN}{title}{_RESET}")
     print(f"  {'─' * 50}")
 
 
@@ -111,8 +125,8 @@ def run_stats(n: int = 10, dir_filter: str | None = None) -> None:
         {where} AND exit_status = 0
         GROUP BY command
         ORDER BY cnt DESC
-        LIMIT {int(n)}
-    """, params).fetchall()
+        LIMIT ?
+    """, params + [int(n)]).fetchall()
 
     # Top directories
     top_dirs = conn.execute("""
@@ -159,24 +173,24 @@ def run_stats(n: int = 10, dir_filter: str | None = None) -> None:
     conn.close()
 
     # Display
-    print("\n  \033[1;33m╔══════════════════════════════════════════════════════╗\033[0m")
-    print("  \033[1;33m║\033[0m       \033[1mautosuggest-cli\033[0m — Usage Statistics           \033[1;33m║\033[0m")
-    print("  \033[1;33m╚══════════════════════════════════════════════════════╝\033[0m")
+    print(f"\n  {_YELLOW}╔══════════════════════════════════════════════════════╗{_RESET}")
+    print(f"  {_YELLOW}║{_RESET}       {_BOLD}autosuggest-cli{_RESET} — Usage Statistics           {_YELLOW}║{_RESET}")
+    print(f"  {_YELLOW}╚══════════════════════════════════════════════════════╝{_RESET}")
 
     _print_section("Overview")
     success_rate = (success / total * 100) if total > 0 else 0
-    print(f"  Total commands recorded:    \033[1m{total:,}\033[0m")
-    print(f"  Unique commands:            \033[1m{unique:,}\033[0m")
-    print(f"  Directories tracked:        \033[1m{directories:,}\033[0m")
-    print(f"  Success rate:               \033[1;32m{success_rate:.1f}%\033[0m")
-    print(f"  Tracking for:               \033[1m{_format_duration(tracking_duration)}\033[0m")
+    print(f"  Total commands recorded:    {_BOLD}{total:,}{_RESET}")
+    print(f"  Unique commands:            {_BOLD}{unique:,}{_RESET}")
+    print(f"  Directories tracked:        {_BOLD}{directories:,}{_RESET}")
+    print(f"  Success rate:               {_GREEN}{success_rate:.1f}%{_RESET}")
+    print(f"  Tracking for:               {_BOLD}{_format_duration(tracking_duration)}{_RESET}")
 
     _print_section("Activity")
-    print(f"  Last 24 hours:              \033[1m{today_count:,}\033[0m commands")
-    print(f"  Last 7 days:                \033[1m{week_count:,}\033[0m commands")
+    print(f"  Last 24 hours:              {_BOLD}{today_count:,}{_RESET} commands")
+    print(f"  Last 7 days:                {_BOLD}{week_count:,}{_RESET} commands")
     if tracking_duration > 86400:
         daily_avg = total / (tracking_duration / 86400)
-        print(f"  Daily average:              \033[1m{daily_avg:.0f}\033[0m commands/day")
+        print(f"  Daily average:              {_BOLD}{daily_avg:.0f}{_RESET} commands/day")
 
     _print_section("Top Commands")
     for i, (cmd, cnt) in enumerate(top_commands, 1):
@@ -193,7 +207,7 @@ def run_stats(n: int = 10, dir_filter: str | None = None) -> None:
     if sequences:
         _print_section("Top Workflows (learned sequences)")
         for i, (from_cmd, to_cmd, cnt) in enumerate(sequences, 1):
-            print(f"  {i:>2}. {from_cmd} \033[36m→\033[0m {to_cmd}  ({cnt}x)")
+            print(f"  {i:>2}. {from_cmd} {_LCYAN}→{_RESET} {to_cmd}  ({cnt}x)")
 
     print()
 
