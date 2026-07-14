@@ -266,6 +266,13 @@ All data stays local:
 - **NO_COLOR / isatty support** — `stats.py` and `selftest.py` respect `NO_COLOR` env var and check `sys.stdout.isatty()` before emitting ANSI codes
 - **ADI EDA workflows** — added adsim, percipient, ADV workspace, synthesis/PnR, formal verification, LSF jobs, and coverage workflows
 
+## Documentation
+
+- [BUSINESS_CASE.md](docs/BUSINESS_CASE.md) — ROI analysis, market comparison, and deployment proposal
+- [USER_GUIDE.txt](docs/USER_GUIDE.txt) — End-user reference
+- [QUICKSTART.txt](docs/QUICKSTART.txt) — Get running in 5 minutes
+- [DESIGN_DOC.txt](docs/design/DESIGN_DOC.txt) — Architecture and internals
+
 ## License
 
 MIT
