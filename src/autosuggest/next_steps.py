@@ -39,7 +39,12 @@ class NextStepResolver:
         results = []
         for rule in self._rules:
             pattern = rule["pattern"]
-            if fnmatch.fnmatch(last_command, pattern) or last_command == pattern:
+            matched = (
+                fnmatch.fnmatch(last_command, pattern)
+                or last_command == pattern
+                or (pattern.endswith(" *") and last_command == pattern[:-2])
+            )
+            if matched:
                 for cmd in rule["next"]:
                     if cmd not in [r.command for r in results]:
                         results.append(NextStep(cmd, 1.0, "workflow"))
@@ -52,12 +57,14 @@ class NextStepResolver:
         merged: list[NextStep] = []
         seen: set[str] = set()
 
-        for s in rule_suggestions:
+        # Learned suggestions first — they reflect actual user patterns.
+        # Workflow rules fill remaining slots as fallback.
+        for s in learned_suggestions:
             if s.command not in seen:
                 merged.append(s)
                 seen.add(s.command)
 
-        for s in learned_suggestions:
+        for s in rule_suggestions:
             if s.command not in seen:
                 merged.append(s)
                 seen.add(s.command)

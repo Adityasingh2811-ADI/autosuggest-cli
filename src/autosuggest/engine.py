@@ -10,10 +10,13 @@ from pathlib import Path
 
 from autosuggest.paths import db_path as _resolve_db_path, apply_journal_mode
 
-# Decay half-life in seconds (1 hour).
-# After 1 hour a command's recency contribution halves.
+# Decay half-life for prefix suggestions (1 hour) — rewards recent typing.
 HALF_LIFE = 3600.0
 DECAY_LAMBDA = 0.693147 / HALF_LIFE  # ln(2) / half_life
+
+# Decay half-life for next-step sequences (7 days) — rewards repeated patterns
+# over weeks, not just what happened in the last hour.
+NEXT_STEPS_HALF_LIFE = 604800.0
 
 # Multiplier applied when historical cwd matches the query cwd exactly.
 CONTEXT_BOOST = 3.0
@@ -28,7 +31,7 @@ LIMIT 500
 """
 
 _NEXT_STEPS_QUERY = """
-SELECT curr.command AS prev_cmd, next.command AS next_cmd, next.timestamp
+SELECT curr.command AS prev_cmd, next.command AS next_cmd, next.timestamp, curr.cwd
 FROM command_history curr
 JOIN command_history next
   ON next.cwd = curr.cwd
@@ -39,7 +42,6 @@ JOIN command_history next
       WHERE n.cwd = curr.cwd AND n.id > curr.id
   )
 WHERE curr.command = ?
-  AND curr.cwd = ?
   AND curr.exit_status = 0
   AND next.exit_status = 0
 ORDER BY next.timestamp DESC
@@ -120,19 +122,35 @@ class PredictionEngine:
         limit: int = 3,
     ) -> list[NextStep]:
         now = time.time()
+        home = str(Path.home())
+        normalized_cwd = current_cwd.replace("~", home) if current_cwd.startswith("~") else current_cwd
+
         rows = self._conn.execute(
-            _NEXT_STEPS_QUERY, (last_command, current_cwd)
+            _NEXT_STEPS_QUERY, (last_command,)
         ).fetchall()
 
-        scores: dict[str, float] = {}
-        for _prev, next_cmd, ts in rows:
-            if next_cmd == last_command:
-                continue
-            recency = _recency_score(now, ts)
-            scores[next_cmd] = scores.get(next_cmd, 0.0) + recency
+        _SKIP_CMDS = frozenset({"exit", "quit", "clear", "ls", "pwd"})
 
-        if not scores:
+        counts: dict[str, int] = {}
+        recency_best: dict[str, float] = {}
+        for _prev, next_cmd, ts, row_cwd in rows:
+            if next_cmd == last_command or next_cmd in _SKIP_CMDS:
+                continue
+            norm_row_cwd = row_cwd.replace("~", home) if row_cwd.startswith("~") else row_cwd
+            context = CONTEXT_BOOST if norm_row_cwd == normalized_cwd else 1.0
+            counts[next_cmd] = counts.get(next_cmd, 0) + 1
+            recency = _recency_score_nextsteps(now, ts) * context
+            if next_cmd not in recency_best or recency > recency_best[next_cmd]:
+                recency_best[next_cmd] = recency
+
+        if not counts:
             return []
+
+        # Hybrid score: frequency dominates, recency breaks ties.
+        # A command used 10 times weeks ago scores higher than one used once yesterday.
+        scores: dict[str, float] = {}
+        for cmd in counts:
+            scores[cmd] = counts[cmd] + recency_best[cmd]
 
         max_score = max(scores.values())
         ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:limit]
@@ -152,3 +170,8 @@ class PredictionEngine:
 def _recency_score(now: float, timestamp: float) -> float:
     age = now - timestamp
     return 2.0 ** (-age / HALF_LIFE)
+
+
+def _recency_score_nextsteps(now: float, timestamp: float) -> float:
+    age = now - timestamp
+    return 2.0 ** (-age / NEXT_STEPS_HALF_LIFE)

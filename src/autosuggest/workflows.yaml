@@ -23,7 +23,7 @@ workflows:
   - name: "python-dev"
     steps:
       - pattern: "pip install *"
-        next: ["python -m pytest", "pip freeze > requirements.txt", "python -c 'import *'"]
+        next: ["python -m pytest", "pip freeze > requirements.txt", "python -c 'import <package>'"]
       - pattern: "python -m pytest*"
         next: ["git add .", "python -m pytest --cov", "python -m pytest -x"]
       - pattern: "pip freeze*"
