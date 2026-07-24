@@ -55,8 +55,9 @@ CSHRC_USER="$HOME/.cshrc.user"
 BEGIN="# >>> autosuggest-cli >>>"
 END="# <<< autosuggest-cli <<<"
 
-say()  { printf '  %s\n' "$*"; }
-ok()   { printf '  [ok] %s\n' "$*"; }
+QUIET="${QUIET:-0}"
+say()  { [ "$QUIET" = "1" ] && return; printf '  %s\n' "$*"; }
+ok()   { [ "$QUIET" = "1" ] && return; printf '  [ok] %s\n' "$*"; }
 warn() { printf '  [!!] %s\n' "$*" >&2; }
 die()  { printf '\n  ERROR: %s\n' "$*" >&2; exit 1; }
 
@@ -275,7 +276,10 @@ command -v suggest-hook >/dev/null 2>&1 \
     && ok "suggest-hook found at $(command -v suggest-hook)" \
     || warn "suggest-hook not on PATH yet (the dotfiles below will fix that at login)"
 
-# ---- 3a. stop any daemon left over from a previous version -----------------
+# ---- 3a. record install metric ----------------------------------------------
+"$PYBIN" -m autosuggest.metrics increment installs >/dev/null 2>&1 || true
+
+# ---- 3b. stop any daemon left over from a previous version -----------------
 # A long-lived daemon started by an earlier install keeps running the OLD code
 # against the freshly installed package (and holds the DB open, which can block
 # the import below). Stop it now; the shell hook relaunches a fresh one with the
@@ -349,24 +353,22 @@ if grep -qF "$BEGIN" "$CSHRC_USER" 2>/dev/null; then
         "$CSHRC_USER" > "$tmp" && mv "$tmp" "$CSHRC_USER"
 fi
 
-if [ "${NO_AUTOLAUNCH:-0}" = "1" ]; then
-    AUTOLAUNCH_BODY="    # raise the (managed) tcsh history cap so ~/.history accumulates
-    set history = 10000
-    set savehist = (10000 merge)
-    # auto-launch disabled (NO_AUTOLAUNCH=1); run 'suggest-start' manually
-    alias suggest-start 'bash --rcfile ~/.suggest_bashrc -i'"
-else
+if [ "${AUTOLAUNCH:-0}" = "1" ]; then
     AUTOLAUNCH_BODY="    # raise the (managed) tcsh history cap so ~/.history accumulates
     set history = 10000
     set savehist = (10000 merge)
     alias suggest-start 'bash --rcfile ~/.suggest_bashrc -i'
     # auto-enter the hooked bash for interactive logins (kill switch: ~/.no_autosuggest).
-    # NOTE: no 'exec' — so typing 'exit' in bash returns to this tcsh login
-    # shell instead of closing the terminal.
     if ( \$?prompt && ! \$?AUTOSUGGEST_ACTIVE && ! -e ~/.no_autosuggest ) then
         setenv AUTOSUGGEST_ACTIVE 1
         bash --rcfile ~/.suggest_bashrc -i
     endif"
+else
+    AUTOLAUNCH_BODY="    # raise the (managed) tcsh history cap so ~/.history accumulates
+    set history = 10000
+    set savehist = (10000 merge)
+    # Shell is NOT auto-switched. Run 'suggest-start' to enter hooked bash.
+    alias suggest-start 'bash --rcfile ~/.suggest_bashrc -i'"
 fi
 
 cat >> "$CSHRC_USER" <<EOF

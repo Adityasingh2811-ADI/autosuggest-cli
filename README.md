@@ -1,16 +1,26 @@
 # autosuggest-cli
 
-A context-aware CLI autosuggestion engine that provides real-time ghost-text predictions based on your command history. It uses a **frecency** algorithm (frequency + recency + directory context) to surface the most relevant suggestions as you type.
+A context-aware CLI workflow engine that **reduces context-switching cost** across projects. It learns your command sequences per directory and surfaces the right next step — so you spend less time remembering and more time executing.
+
+Whether you manage dozens of verification runs, switch between IP blocks daily, or onboard new engineers to unfamiliar flows, autosuggest-cli captures and replays the tribal knowledge embedded in your shell history.
+
+## Why experienced engineers use it
+
+- **Workflow sequencing** — after running `make sim`, it knows you usually run `make waves` next. It learns YOUR patterns, not generic ones.
+- **Directory-aware context** — suggestions change based on which project/block you're in. The right commands surface in the right place.
+- **Project onboarding** — new engineers entering a directory immediately see what commands are typically run there.
+- **Never lose a flow** — context-switch between 5 projects and pick up exactly where you left off in each one.
 
 ## Features
 
-- **Ghost-text inline suggestions** — greyed-out predictions appear as you type, accept with `Right Arrow`
-- **Tab completion menu** — cycle through ranked suggestions with `Tab` / `Shift+Tab`
 - **Next-step suggestions** — after each command, see likely follow-up commands (learned from your patterns + predefined workflows)
+- **Ghost-text inline suggestions** — greyed-out predictions appear as you type, accept with `Right Arrow`
+- **Expert mode** (`suggest --expert`) — disables ghost-text, shows only workflow/next-step suggestions for power users
+- **Tab completion menu** — cycle through ranked suggestions with `Tab` / `Shift+Tab`
 - **Frecency scoring** — combines how often and how recently you used a command, boosted when you're in the same directory
-- **Background telemetry daemon** — records commands via a lightweight socket without blocking your shell
-- **Shell hook integration** — use your real shell (bash/PowerShell) while still feeding data to the engine
-- **History import** — bootstrap suggestions from your existing bash or PowerShell history
+- **Background daemon** — records commands via a lightweight socket without blocking your shell (<5ms overhead)
+- **Shell hook integration** — works with your existing shell (tcsh/bash/zsh/PowerShell) without modifying your environment
+- **History import** — bootstrap suggestions from your existing shell history
 - **Cross-platform** — works on Linux, macOS, and Windows
 
 ## Installation
@@ -23,17 +33,26 @@ Requires Python 3.10+.
 
 ### ADI team install (managed hosts)
 
-Clone the repo and run the installer — it loads Python for you and installs
-into your own `~/.local`:
+Run the installer from anywhere — no need to clone or `cd` into the repo:
 
 ```bash
-git clone https://github.com/Adityasingh2811-ADI/autosuggest-cli.git
-cd autosuggest-cli
-bash install-linux.sh
+bash /path/to/autosuggest-cli/install-linux.sh
 rehash            # tcsh only, so it finds the new commands
 ```
 
+Or clone and install in one step:
+
+```bash
+git clone https://github.com/Adityasingh2811-ADI/autosuggest-cli.git
+bash autosuggest-cli/install-linux.sh
+```
+
 Re-running the installer is safe (it never duplicates dotfile entries).
+
+> **Note:** The installer does NOT auto-switch your shell or modify your PATH.
+> Your tcsh environment remains unchanged. Run `suggest-start` explicitly to
+> enter the enhanced shell, or use `eval \`suggest-hook tcsh\`` for native tcsh
+> next-step suggestions without leaving your shell.
 
 ### Managed Linux hosts (Exceed TurboX / EDA-CAD farms) — one-shot install
 

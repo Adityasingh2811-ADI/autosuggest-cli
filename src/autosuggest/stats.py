@@ -109,7 +109,9 @@ def run_stats(n: int = 10, dir_filter: str | None = None) -> None:
     ).fetchone()[0]
 
     if total == 0:
-        print("\n  No commands recorded yet. Start using the shell to build history!\n")
+        print("\n  No commands recorded yet.")
+        print("  Use your shell for a few minutes — the daemon records commands automatically.")
+        print("  Run 'suggest-stats --check' to verify DB health.\n")
         conn.close()
         return
 
@@ -126,7 +128,7 @@ def run_stats(n: int = 10, dir_filter: str | None = None) -> None:
         GROUP BY command
         ORDER BY cnt DESC
         LIMIT ?
-    """, params + [int(n)]).fetchall()
+    """, params + (int(n),)).fetchall()
 
     # Top directories
     top_dirs = conn.execute("""
@@ -212,12 +214,50 @@ def run_stats(n: int = 10, dir_filter: str | None = None) -> None:
     print()
 
 
+def run_check() -> None:
+    """Validate DB existence, schema, and row count."""
+    print(f"\n  {_BOLD}suggest-stats --check{_RESET}\n")
+    if not DB_PATH.exists():
+        print(f"  DB path:    {DB_PATH}")
+        print(f"  Status:     {_YELLOW}NOT FOUND{_RESET}")
+        print("  The history database has not been created yet.")
+        print("  Ensure the daemon is running: suggest-daemon start\n")
+        return
+    import sqlite3
+    try:
+        conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+        conn.execute("PRAGMA busy_timeout=5000;")
+        tables = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+        has_history = "command_history" in tables
+        row_count = 0
+        if has_history:
+            row_count = conn.execute("SELECT COUNT(*) FROM command_history").fetchone()[0]
+        conn.close()
+    except sqlite3.Error as e:
+        print(f"  DB path:    {DB_PATH}")
+        print(f"  Status:     {_YELLOW}ERROR — {e}{_RESET}\n")
+        return
+
+    print(f"  DB path:    {DB_PATH}")
+    print(f"  DB size:    {DB_PATH.stat().st_size / 1024:.1f} KB")
+    print(f"  Schema:     {'command_history table present' if has_history else _YELLOW + 'MISSING command_history table' + _RESET}")
+    print(f"  Rows:       {row_count:,}")
+    if row_count == 0:
+        print(f"  Status:     {_YELLOW}EMPTY — use the shell to build history{_RESET}")
+    else:
+        print(f"  Status:     {_GREEN}HEALTHY{_RESET}")
+    print()
+
+
 def run() -> None:
     ap = argparse.ArgumentParser(prog="suggest-stats", description="autosuggest usage stats")
     ap.add_argument("-n", "--top", type=int, default=10, help="number of top commands to show")
     ap.add_argument("--dir", metavar="PATH", help="only count commands run in this directory")
     ap.add_argument("--after", metavar="CMD", help="show commands usually run after CMD")
     ap.add_argument("--json", action="store_true", help="machine-readable top commands")
+    ap.add_argument("--check", action="store_true", help="validate DB health and report status")
+    ap.add_argument("--metrics", action="store_true", help="show install/invocation counters")
     from autosuggest import __version__
 
     ap.add_argument(
@@ -225,6 +265,27 @@ def run() -> None:
     )
     args = ap.parse_args()
 
+    if args.check:
+        run_check()
+        return
+    if args.metrics:
+        from autosuggest.metrics import get_metrics
+        data = get_metrics()
+        print(f"\n  {_BOLD}Metrics{_RESET}\n")
+        print(f"  Installs:            {_BOLD}{data.get('installs', 0)}{_RESET}")
+        print(f"  Suggestions served:  {_BOLD}{data.get('suggestions_served', 0)}{_RESET}")
+        print(f"  Daemon starts:       {_BOLD}{data.get('daemon_starts', 0)}{_RESET}")
+        print(f"  Sessions:            {_BOLD}{data.get('sessions', 0)}{_RESET}")
+        if data.get("first_install"):
+            from datetime import datetime
+            ts = datetime.fromtimestamp(data["first_install"]).strftime("%Y-%m-%d %H:%M")
+            print(f"  First install:       {ts}")
+        if data.get("last_active"):
+            from datetime import datetime
+            ts = datetime.fromtimestamp(data["last_active"]).strftime("%Y-%m-%d %H:%M")
+            print(f"  Last active:         {ts}")
+        print()
+        return
     if args.after:
         _print_after(_connect(), args.after, args.top)
         return

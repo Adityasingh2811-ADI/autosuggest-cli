@@ -5,6 +5,7 @@ and fire-and-forget telemetry to the background daemon.
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -70,6 +71,8 @@ class FrecencyCompleter(Completer):
 
 
 class FrecencyAutoSuggest(AutoSuggest):
+    MAX_GHOST_LENGTH = 120
+
     def __init__(self, engine: PredictionEngine) -> None:
         self._engine = engine
 
@@ -79,20 +82,19 @@ class FrecencyAutoSuggest(AutoSuggest):
             return None
         cwd = os.getcwd()
 
-        # Try argument-aware ghost-text first
         arg_completions = get_arg_completions(text, cwd)
         if arg_completions:
             best = arg_completions[0].text
             if best != text:
                 suffix = best[len(text):]
                 if suffix:
-                    return Suggestion(suffix)
+                    return Suggestion(suffix[:self.MAX_GHOST_LENGTH])
 
         suggestions = self._engine.get_suggestions(text, cwd, limit=1)
         if suggestions and suggestions[0].command != text:
             suffix = suggestions[0].command[len(text):]
             if suffix:
-                return Suggestion(suffix)
+                return Suggestion(suffix[:self.MAX_GHOST_LENGTH])
         return None
 
 
@@ -150,17 +152,40 @@ def _send_telemetry(command: str, cwd: str, exit_status: int) -> None:
 def _prompt_text() -> HTML:
     cwd = os.getcwd()
     home = str(Path.home())
-    display = "~" + cwd[len(home):] if cwd.startswith(home) else cwd
+    if cwd == home:
+        display = "~"
+    elif cwd.startswith(home):
+        rel = cwd[len(home) + 1:]
+        parts = rel.split(os.sep)
+        if len(parts) > 2:
+            display = "~/" + os.sep.join(parts[-2:])
+        else:
+            display = "~/" + rel
+    else:
+        parts = cwd.split(os.sep)
+        if len(parts) > 2:
+            display = os.sep.join(parts[-2:])
+        else:
+            display = cwd
     return HTML(f"<b>{display}</b> ▶ ")
+
+
+def _truncate(text: str, max_width: int) -> str:
+    if len(text) <= max_width:
+        return text
+    return text[:max_width - 1] + "…"
 
 
 def _show_next_steps(suggestions: list) -> None:
     if not suggestions:
         return
+    cols = shutil.get_terminal_size((80, 24)).columns
+    cmd_width = min(cols - 20, 60)
     print("\n  \033[36mNext steps:\033[0m")
     for i, s in enumerate(suggestions, 1):
+        display_cmd = _truncate(s.command, cmd_width)
         source_tag = f"\033[33m({s.source})\033[0m"
-        print(f"  \033[1m[{i}]\033[0m {s.command:<40} {source_tag}")
+        print(f"  \033[1m[{i}]\033[0m {display_cmd:<{cmd_width}} {source_tag}")
     print()
 
 
@@ -191,27 +216,38 @@ def main() -> None:
 
         print(f"suggest {__version__}")
         return
+
+    expert_mode = "--expert" in sys.argv[1:] or "--minimal" in sys.argv[1:]
+
     _ensure_daemon()
     engine = PredictionEngine()
     resolver = NextStepResolver(engine)
     runner = CommandRunner(start_cwd=os.getcwd())
-    session: PromptSession = PromptSession(
-        completer=FrecencyCompleter(engine),
-        auto_suggest=FrecencyAutoSuggest(engine),
-        key_bindings=_build_keybindings(),
-        style=STYLE,
-        complete_while_typing=True,
-    )
 
-    print("autosuggest-cli | Ctrl+D to exit | Tab/Shift+Tab: cycle | ->: accept ghost")
-    print("  Type a number [1-3] after suggestions to accept a next step.\n")
+    session_kwargs: dict = {
+        "completer": FrecencyCompleter(engine),
+        "key_bindings": _build_keybindings(),
+        "style": STYLE,
+        "complete_while_typing": not expert_mode,
+    }
+    if not expert_mode:
+        session_kwargs["auto_suggest"] = FrecencyAutoSuggest(engine)
+
+    session: PromptSession = PromptSession(**session_kwargs)
+
+    print("suggest | Ctrl+D to exit | Tab/Shift+Tab: cycle | ->: accept ghost")
+    if expert_mode:
+        print("  [expert mode: ghost-text disabled, workflow suggestions only]\n")
+    else:
+        print("  Type a number [1-3] after suggestions to accept a next step.\n")
     if runner.persistent:
         if runner.backend == "tcsh":
-            print("  [native tcsh backend: pinit, source .csh, module load all work natively]\n")
+            print("  [native shell backend: pinit, source .csh, module load all work natively]\n")
         else:
-            print("  [persistent bash shell: module/env changes carry across commands]\n")
+            print("  [persistent shell: module/env changes carry across commands]\n")
 
     last_suggestions: list = []
+    original_cwd = os.getcwd()
 
     while True:
         try:
@@ -257,6 +293,10 @@ def main() -> None:
         _show_next_steps(last_suggestions)
 
     engine.close()
+    try:
+        os.chdir(original_cwd)
+    except OSError:
+        pass
     print("\nSession ended.")
 
 

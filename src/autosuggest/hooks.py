@@ -8,23 +8,14 @@ import sys
 from pathlib import Path
 
 BASH_HOOK = r'''
-# autosuggest-cli: telemetry + suggestions hook for bash
-# Records each command to the autosuggest daemon and surfaces frecency-based
-# completions plus next-step prompts in your real bash shell.
-#
-# Feature parity notes vs PowerShell:
-#   * Telemetry recording ......... yes (Unix socket, TCP fallback)
-#   * Accept top suggestion ....... Ctrl+F, and Right-arrow at end of line
-#   * Frecency Tab completion ..... yes (programmable completion)
-#   * Next-step suggestions ....... yes (printed after each command)
-# Stock bash cannot render continuously-updating inline ghost text reliably
-# (readline redraws the line after each key); use the zsh hook for true inline
-# ghost text. Set AUTOSUGGEST_NO_NEXTSTEPS=1 to silence next-step output.
+# suggest: shell hook for bash
+# Records commands and surfaces workflow-aware next-step suggestions.
+# Set AUTOSUGGEST_NO_NEXTSTEPS=1 to silence next-step output.
 _autosuggest_last_hist=""
+_autosuggest_daemon_checked=""
 
 # Resolve socket path (XDG on Linux, TCP fallback on Windows/WSL)
 _autosuggest_sock="${XDG_RUNTIME_DIR:-/tmp/autosuggest-$(id -u)}/autosuggest.sock"
-# Daemon start errors go here (not /dev/null) so failures are diagnosable.
 _autosuggest_log="${XDG_RUNTIME_DIR:-/tmp/autosuggest-$(id -u)}/daemon.log"
 
 # Resolve a python interpreter once per session
@@ -42,16 +33,15 @@ _autosuggest_resolve_python() {
 _autosuggest_resolve_python
 
 _autosuggest_ensure_daemon() {
-    # A live daemon answers on the socket. A leftover socket file from a killed
-    # daemon must NOT be mistaken for a live one, so connect-probe it rather
-    # than just checking that the file exists.
+    # Only check once per session to avoid per-command overhead
+    if [ -n "$_autosuggest_daemon_checked" ]; then
+        return
+    fi
+    _autosuggest_daemon_checked=1
     if [[ -S "$_autosuggest_sock" ]] && command -v socat &>/dev/null \
        && socat -T1 - UNIX-CONNECT:"$_autosuggest_sock" </dev/null &>/dev/null; then
         return
     fi
-    # Not answering (dead, stale socket, or never started) -> (re)start it. The
-    # daemon reaps any stale socket and holds a singleton lock, so a duplicate
-    # start is harmless.
     if command -v suggest-daemon &>/dev/null; then
         suggest-daemon start </dev/null >>"$_autosuggest_log" 2>&1 &
         disown
@@ -61,9 +51,8 @@ _autosuggest_ensure_daemon() {
     fi
 }
 
-# Deliver one command to the daemon. Fast path: the Unix socket via socat (no
-# python). If the daemon is unreachable, fall back to record.py, which retries
-# the socket and then writes straight to the DB — so a command is never lost.
+# Deliver one command to the daemon via socat (backgrounded, non-blocking).
+# If daemon is unreachable, silently skip — no Python fallback to avoid latency.
 _autosuggest_send() {
     local cmd="$1" cwd="$2" st="$3"
 
@@ -72,15 +61,7 @@ _autosuggest_send() {
         local ew="${cwd//\\/\\\\}"; ew="${ew//\"/\\\"}"
         local payload
         payload=$(printf '{"command":"%s","cwd":"%s","exit_status":%d}' "$ec" "$ew" "$st")
-        # A local socket round-trip is sub-millisecond; -T2 caps a hung daemon.
-        if printf '%s' "$payload" | socat -T2 - UNIX-CONNECT:"$_autosuggest_sock" >/dev/null 2>&1; then
-            return
-        fi
-    fi
-
-    # Daemon unreachable: record.py retries the socket, then writes to the DB.
-    if [ -n "$_autosuggest_python" ]; then
-        "$_autosuggest_python" -m autosuggest.record "$cmd" "$cwd" "$st" >/dev/null 2>&1 &
+        printf '%s' "$payload" | socat -T2 - UNIX-CONNECT:"$_autosuggest_sock" >/dev/null 2>&1 &
         disown 2>/dev/null
     fi
 }
@@ -117,13 +98,18 @@ _autosuggest_hook() {
         steps=$("$_autosuggest_python" -m autosuggest.nextsteps_cli "$cmd" "$PWD" 2>/dev/null)
         if [ -n "$steps" ]; then
             printf '\n  \033[36mNext steps:\033[0m\n'
-            local i=1 line suggestion source
+            local i=1 line suggestion source max_w
+            max_w=$(( ${COLUMNS:-80} - 20 ))
+            [ $max_w -gt 60 ] && max_w=60
             while IFS=$'\t' read -r suggestion source _; do
                 [ -z "$suggestion" ] && continue
+                if [ ${#suggestion} -gt $max_w ]; then
+                    suggestion="${suggestion:0:$((max_w - 1))}…"
+                fi
                 if [ -n "$source" ]; then
-                    printf '  \033[1m[%d]\033[0m %-40s \033[33m(%s)\033[0m\n' "$i" "$suggestion" "$source"
+                    printf '  \033[1m[%d]\033[0m %-'"$max_w"'s \033[33m(%s)\033[0m\n' "$i" "$suggestion" "$source"
                 else
-                    printf '  \033[1m[%d]\033[0m %-40s\n' "$i" "$suggestion"
+                    printf '  \033[1m[%d]\033[0m %-'"$max_w"'s\n' "$i" "$suggestion"
                 fi
                 i=$((i + 1))
             done <<< "$steps"
@@ -190,16 +176,13 @@ fi
 '''
 
 ZSH_HOOK = r'''
-# autosuggest-cli: telemetry + inline ghost-text + next-steps hook for zsh
-# zsh's line editor (zle) supports true inline ghost text via POSTDISPLAY,
-# giving feature parity with the PowerShell predictor.
-#   * Inline ghost text ........... yes (accept with Right-arrow or Ctrl+F)
-#   * Frecency Tab completion ..... yes
-#   * Next-step suggestions ....... yes (printed after each command)
+# suggest: shell hook for zsh
+# Records commands, provides inline ghost-text, and surfaces next-step suggestions.
 # Set AUTOSUGGEST_NO_NEXTSTEPS=1 to silence next-step output.
 
 _autosuggest_sock="${XDG_RUNTIME_DIR:-/tmp/autosuggest-$(id -u)}/autosuggest.sock"
 _autosuggest_log="${XDG_RUNTIME_DIR:-/tmp/autosuggest-$(id -u)}/daemon.log"
+_autosuggest_daemon_checked=""
 
 _autosuggest_python=""
 if command -v python3 &>/dev/null; then
@@ -209,8 +192,9 @@ elif command -v python &>/dev/null; then
 fi
 
 _autosuggest_ensure_daemon() {
-    # Connect-probe the socket; a leftover socket file from a killed daemon must
-    # not be mistaken for a live one (else it never gets restarted).
+    # Only check once per session to avoid per-command overhead
+    [[ -n "$_autosuggest_daemon_checked" ]] && return
+    _autosuggest_daemon_checked=1
     if [[ -S "$_autosuggest_sock" ]] && command -v socat &>/dev/null \
        && socat -T1 - UNIX-CONNECT:"$_autosuggest_sock" </dev/null &>/dev/null; then
         return
@@ -222,6 +206,7 @@ _autosuggest_ensure_daemon() {
     fi
 }
 
+# Backgrounded send — no Python fallback to avoid latency.
 _autosuggest_send() {
     local cmd="$1" cwd="$2" st="$3"
 
@@ -230,15 +215,7 @@ _autosuggest_send() {
         local ew="${cwd//\\/\\\\}"; ew="${ew//\"/\\\"}"
         local payload
         payload=$(printf '{"command":"%s","cwd":"%s","exit_status":%d}' "$ec" "$ew" "$st")
-        # A local socket round-trip is sub-millisecond; -T2 caps a hung daemon.
-        if printf '%s' "$payload" | socat -T2 - UNIX-CONNECT:"$_autosuggest_sock" >/dev/null 2>&1; then
-            return
-        fi
-    fi
-
-    # Daemon unreachable: record.py retries the socket, then writes to the DB.
-    if [[ -n "$_autosuggest_python" ]]; then
-        "$_autosuggest_python" -m autosuggest.record "$cmd" "$cwd" "$st" >/dev/null 2>&1 &!
+        printf '%s' "$payload" | socat -T2 - UNIX-CONNECT:"$_autosuggest_sock" >/dev/null 2>&1 &!
     fi
 }
 
@@ -266,13 +243,18 @@ _autosuggest_precmd() {
         steps=$("$_autosuggest_python" -m autosuggest.nextsteps_cli "$cmd" "$PWD" 2>/dev/null)
         if [[ -n "$steps" ]]; then
             print -P "\n  %F{cyan}Next steps:%f"
-            local i=1 suggestion source rest
+            local i=1 suggestion source rest max_w
+            max_w=$(( ${COLUMNS:-80} - 20 ))
+            [[ $max_w -gt 60 ]] && max_w=60
             while IFS=$'\t' read -r suggestion source rest; do
                 [[ -z "$suggestion" ]] && continue
+                if [[ ${#suggestion} -gt $max_w ]]; then
+                    suggestion="${suggestion:0:$((max_w - 1))}…"
+                fi
                 if [[ -n "$source" ]]; then
-                    printf '  \033[1m[%d]\033[0m %-40s \033[33m(%s)\033[0m\n' "$i" "$suggestion" "$source"
+                    printf '  \033[1m[%d]\033[0m %-'"$max_w"'s \033[33m(%s)\033[0m\n' "$i" "$suggestion" "$source"
                 else
-                    printf '  \033[1m[%d]\033[0m %-40s\n' "$i" "$suggestion"
+                    printf '  \033[1m[%d]\033[0m %-'"$max_w"'s\n' "$i" "$suggestion"
                 fi
                 i=$((i + 1))
             done <<< "$steps"
@@ -822,40 +804,22 @@ function global:prompt {
 '''
 
 TCSH_HOOK = r'''
-# autosuggest-cli: telemetry + next-step hook for tcsh/csh
+# suggest: shell hook for tcsh/csh
+# Records commands and surfaces next-step workflow suggestions.
+# This hook does NOT modify your PATH or working directory.
+# Set AUTOSUGGEST_NO_NEXTSTEPS=1 to silence next-step output.
 #
-# tcsh has no programmable line editor, so this hook does NOT provide inline
-# ghost text, an accept-suggestion key, or frecency Tab completion (use the
-# zsh hook or the `suggest` REPL for those). In your native tcsh login shell
-# it does give you:
-#   * Telemetry recording ......... yes (records every command)
-#   * Next-step suggestions ....... yes (printed after each command)
-#   * Inline ghost text ........... no  (tcsh limitation)
-#   * Frecency Tab completion ..... no  (tcsh limitation)
-#
-# PERFORMANCE: with next-step output enabled the recorder runs synchronously
-# before each prompt (it must print above the prompt). On slow NFS-home hosts
-# that Python start-up can add latency. Set AUTOSUGGEST_NO_NEXTSTEPS=1 and the
-# per-prompt recorder is backgrounded instead, so the prompt never blocks:
-#     setenv AUTOSUGGEST_NO_NEXTSTEPS 1
-#
-# Load it with tcsh-native BACKTICKS — csh/tcsh CANNOT parse $(...):
-#     eval `suggest-hook tcsh`
-# Persist it by adding that line to ~/.tcshrc (or ~/.cshrc.user on managed
-# hosts).
+# Load with: eval `suggest-hook tcsh`
 
-# Put pip --user scripts on PATH so suggest-* resolve, then refresh the hash.
-if ( -d ~/.local/bin ) then
-    set path = ( $HOME/.local/bin $path )
-    rehash
-endif
-
-# Resolve a python interpreter once per session.
+# Resolve a python interpreter once per session using absolute paths.
+# Does NOT modify $path — looks up the binary location and stores it.
 if ( ! $?_AUTOSUGGEST_PY ) then
-    if ( -X python3 ) then
-        set _AUTOSUGGEST_PY = python3
+    if ( -x "$HOME/.local/bin/python3" ) then
+        set _AUTOSUGGEST_PY = "$HOME/.local/bin/python3"
+    else if ( -X python3 ) then
+        set _AUTOSUGGEST_PY = `which python3`
     else if ( -X python ) then
-        set _AUTOSUGGEST_PY = python
+        set _AUTOSUGGEST_PY = `which python`
     else
         set _AUTOSUGGEST_PY = ""
     endif
@@ -882,23 +846,25 @@ if ( "$_AUTOSUGGEST_PY" != "" ) then
         endif
     endif
     if ( $_as_start ) then
-        # Log start errors (port in use, etc.) instead of discarding them.
-        if ( -X suggest-daemon ) then
-            ( suggest-daemon start >>& "$_as_log" & )
-        else
-            ( $_AUTOSUGGEST_PY -m autosuggest.daemon start >>& "$_as_log" & )
-        endif
+        ( $_AUTOSUGGEST_PY -m autosuggest.daemon start >>& "$_as_log" & )
     endif
     unset _as_sock
     unset _as_log
     unset _as_start
 endif
 
+# Chain existing precmd alias if one is already defined.
+if ( $?_as_orig_precmd ) then
+    # already chained
+else if ( `alias precmd` != "" ) then
+    set _as_orig_precmd = "`alias precmd`"
+else
+    set _as_orig_precmd = ""
+endif
+
 # precmd runs before every prompt: record the command just finished and show
-# next-step suggestions. $status MUST be captured on the very first statement
-# so it reflects the command that just ran. When next-steps are disabled the
-# recorder is backgrounded so the prompt returns immediately (non-blocking).
-alias precmd 'set _as_st = $status; set _as_cmd = "`history -h 1`"; if ( "$_AUTOSUGGEST_PY" != "" && $?AUTOSUGGEST_NO_NEXTSTEPS ) ( $_AUTOSUGGEST_PY -m autosuggest.tcsh_precmd "$_as_cmd:q" "$cwd" $_as_st >& /dev/null & ); if ( "$_AUTOSUGGEST_PY" != "" && ! $?AUTOSUGGEST_NO_NEXTSTEPS ) $_AUTOSUGGEST_PY -m autosuggest.tcsh_precmd "$_as_cmd:q" "$cwd" $_as_st'
+# next-step suggestions. Chains any previously-defined precmd at the end.
+alias precmd 'set _as_st = $status; set _as_cmd = "`history -h 1`"; if ( "$_AUTOSUGGEST_PY" != "" && $?AUTOSUGGEST_NO_NEXTSTEPS ) ( $_AUTOSUGGEST_PY -m autosuggest.tcsh_precmd "$_as_cmd:q" "$cwd" $_as_st >& /dev/null & ); if ( "$_AUTOSUGGEST_PY" != "" && ! $?AUTOSUGGEST_NO_NEXTSTEPS ) $_AUTOSUGGEST_PY -m autosuggest.tcsh_precmd "$_as_cmd:q" "$cwd" $_as_st; if ( "$_as_orig_precmd" != "" ) eval "$_as_orig_precmd"'
 '''
 
 BASH_SOURCE_LINE = 'eval "$(suggest-hook bash)"'
@@ -925,7 +891,7 @@ def _print_hook(shell: str) -> None:
 def _install_hook(shell: str) -> None:
     if shell == "bash":
         bashrc = Path.home() / ".bashrc"
-        source_line = f'\n# autosuggest-cli telemetry hook\n{BASH_SOURCE_LINE}\n'
+        source_line = f'\n# suggest: workflow hook\n{BASH_SOURCE_LINE}\n'
         if bashrc.exists() and BASH_SOURCE_LINE in bashrc.read_text():
             print(f"[hook] already installed in {bashrc}")
             return
@@ -936,7 +902,7 @@ def _install_hook(shell: str) -> None:
 
     elif shell == "zsh":
         zshrc = Path(os.environ.get("ZDOTDIR", str(Path.home()))) / ".zshrc"
-        source_line = f'\n# autosuggest-cli telemetry hook\n{ZSH_SOURCE_LINE}\n'
+        source_line = f'\n# suggest: workflow hook\n{ZSH_SOURCE_LINE}\n'
         if zshrc.exists() and ZSH_SOURCE_LINE in zshrc.read_text():
             print(f"[hook] already installed in {zshrc}")
             return
@@ -947,25 +913,16 @@ def _install_hook(shell: str) -> None:
 
     elif shell in ("tcsh", "csh"):
         tcshrc = Path.home() / ".tcshrc"
-        # tcsh needs ~/.local/bin on PATH (and a rehash) *before* it can find
-        # suggest-hook, so the persisted block bootstraps PATH first, then evals
-        # the hook with tcsh-native backticks.
-        block = (
-            "\n# autosuggest-cli telemetry hook\n"
-            "if ( -d ~/.local/bin ) then\n"
-            "    set path = ( $HOME/.local/bin $path )\n"
-            "    rehash\n"
-            "endif\n"
-            f"{TCSH_SOURCE_LINE}\n"
-        )
-        if tcshrc.exists() and TCSH_SOURCE_LINE in tcshrc.read_text():
+        hook_file = Path.home() / ".suggest-hook.csh"
+        source_line = "source ~/.suggest-hook.csh"
+        hook_file.write_text(TCSH_HOOK.strip() + "\n", encoding="utf-8")
+        if tcshrc.exists() and source_line in tcshrc.read_text():
             print(f"[hook] already installed in {tcshrc}")
             return
         with open(tcshrc, "a", encoding="utf-8") as f:
-            f.write(block)
+            f.write(f"\n# suggest: workflow hook\nif ( -f ~/.suggest-hook.csh ) {source_line}\n")
         print(f"[hook] installed tcsh hook in {tcshrc}")
         print(f"  Run: source ~/.tcshrc")
-        print("  Note: tcsh gets telemetry + next-steps only (no inline ghost text).")
 
     elif shell == "powershell":
         # PowerShell profile path

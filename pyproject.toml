@@ -30,6 +30,7 @@ suggest-nextsteps = "autosuggest.nextsteps_cli:main"
 suggest-stats = "autosuggest.stats:run"
 suggest-seed = "autosuggest.seed:run_seed"
 suggest-selftest = "autosuggest.selftest:run"
+suggest-benchmark = "autosuggest.benchmark:run"
 
 [tool.setuptools.package-data]
 autosuggest = ["schema.sql", "workflows.yaml", "seed_commands.json"]
